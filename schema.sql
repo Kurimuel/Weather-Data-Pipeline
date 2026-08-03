@@ -15,3 +15,15 @@ CREATE TABLE IF NOT EXISTS weather_readings (
 
 -- index ช่วยให้ query ตามช่วงเวลาเร็วขึ้น (จะมีประโยชน์ตอนทำ dashboard)
 CREATE INDEX IF NOT EXISTS idx_weather_reading_time ON weather_readings(reading_time);
+
+-- อุณหภูมิเฉลี่ยรายวัน พร้อม window function เทียบกับวันก่อนหน้า
+SELECT 
+    location_name,
+    DATE(reading_time) as date,
+    AVG(temperature_c) as avg_temp,
+    AVG(temperature_c) - LAG(AVG(temperature_c)) OVER (
+        PARTITION BY location_name ORDER BY DATE(reading_time)
+    ) as temp_change_from_yesterday
+FROM weather_readings
+GROUP BY location_name, DATE(reading_time)
+ORDER BY date;
