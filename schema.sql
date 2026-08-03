@@ -5,11 +5,11 @@ CREATE TABLE IF NOT EXISTS weather_readings (
     location_name VARCHAR(100) NOT NULL,
     latitude DECIMAL(9,6) NOT NULL,
     longitude DECIMAL(9,6) NOT NULL,
-    reading_time TIMESTAMP NOT NULL,       -- เวลาที่ "ข้อมูล" นี้เป็นของช่วงเวลานั้น (จาก API)
+    reading_time TIMESTAMPTZ NOT NULL,       -- เวลาที่ "ข้อมูล" นี้เป็นของช่วงเวลานั้น (จาก API)
     temperature_c DECIMAL(4,1),
     humidity_percent INTEGER,
     wind_speed_kmh DECIMAL(4,1),
-    fetched_at TIMESTAMP DEFAULT NOW(),    -- เวลาที่ pipeline ไปดึงข้อมูลมาจริง
+    fetched_at TIMESTAMPTZ DEFAULT NOW(),    -- เวลาที่ pipeline ไปดึงข้อมูลมาจริง
     UNIQUE(location_name, reading_time)    -- กันข้อมูลซ้ำ ถ้ารัน pipeline ซ้ำในรอบเดียวกัน
 );
 
