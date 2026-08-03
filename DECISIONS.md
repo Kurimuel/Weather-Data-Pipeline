@@ -68,7 +68,7 @@
 
 ---
 
-6. แก้ TIMESTAMP เป็น TIMESTAMPTZ (แก้ไขภายหลัง)
+## 6. แก้ TIMESTAMP เป็น TIMESTAMPTZ (แก้ไขภายหลัง)
 
 ตัดสินใจ: เปลี่ยน reading_time และ fetched_at จาก TIMESTAMP เป็น TIMESTAMPTZ
 
@@ -79,7 +79,7 @@ TIMESTAMPTZ เก็บ timezone ไปด้วยเสมอ ปลอดภ
 
 ---
 
-7. แยก analysis_queries.sql ออกจาก schema.sql
+## 7. แยก analysis_queries.sql ออกจาก schema.sql
 
 ตัดสินใจ: แยกไฟล์ query วิเคราะห์ (SELECT) ออกจากไฟล์สร้างตาราง (CREATE TABLE)
 
