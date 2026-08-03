@@ -67,7 +67,9 @@
 - ทำให้ทดสอบแต่ละส่วนแยกกันได้ง่ายขึ้น (unit testing)
 
 ---
-
+- requirements.txt — เปลี่ยนจาก psycopg2-binary==2.9.9 เป็น psycopg[binary] (ไม่ pin เวอร์ชัน เพราะอยากได้ตัวล่าสุดที่รองรับ Python 3.13)
+- fetch_weather.py — เปลี่ยน import psycopg2 → import psycopg และเปลี่ยนทุกจุดที่เรียก psycopg2.connect(), psycopg2.OperationalError, psycopg2.Error เป็น psycopg.* แทน (ฟังก์ชันการทำงานเหมือนเดิมทุกอย่าง แค่เปลี่ยนชื่อ library)
+---
 <!--
 เพิ่ม entry ใหม่ที่นี่ทุกครั้งที่ตัดสินใจอะไรสำคัญ เช่น:
 - ทำไมเลือก error handling แบบนี้
