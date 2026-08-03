@@ -65,11 +65,35 @@
 - ถ้าวันหนึ่งเปลี่ยนไปใช้ API เจ้าอื่น (field ชื่อไม่เหมือนกัน ตามที่คุยกันเรื่อง
   schema mismatch) จะแก้แค่ฟังก์ชัน parse ฟังก์ชันอื่นไม่ต้องแตะ
 - ทำให้ทดสอบแต่ละส่วนแยกกันได้ง่ายขึ้น (unit testing)
----
 
 ---
+
+6. แก้ TIMESTAMP เป็น TIMESTAMPTZ (แก้ไขภายหลัง)
+
+ตัดสินใจ: เปลี่ยน reading_time และ fetched_at จาก TIMESTAMP เป็น TIMESTAMPTZ
+
+เหตุผล:
+
+TIMESTAMP ธรรมดาไม่เก็บข้อมูล timezone มาด้วย ถ้าวันหนึ่งมีคนอื่นมาต่อโปรเจกต์ แล้วอยู่คนละ timezone จะสับสนว่าเวลาที่เก็บไว้คือเวลาไหนกันแน่
+TIMESTAMPTZ เก็บ timezone ไปด้วยเสมอ ปลอดภัยกว่าเมื่อระบบขยายไปหลาย timezone ในอนาคต (เช่น เพิ่มเมืองในประเทศอื่น)
+
+---
+
+7. แยก analysis_queries.sql ออกจาก schema.sql
+
+ตัดสินใจ: แยกไฟล์ query วิเคราะห์ (SELECT) ออกจากไฟล์สร้างตาราง (CREATE TABLE)
+
+เหตุผล:
+
+schema.sql รันแค่ครั้งเดียวตอนตั้งค่า database ครั้งแรก
+analysis_queries.sql รันบ่อยๆ ตามต้องการเวลาอยากดูข้อมูล
+แยกไฟล์ทำให้จุดประสงค์ของแต่ละไฟล์ชัดเจน ไม่ต้อง scroll หา query ที่ต้องการ ท่ามกลาง DDL statement (CREATE TABLE, INDEX)
+
+---
+
 - requirements.txt — เปลี่ยนจาก psycopg2-binary==2.9.9 เป็น psycopg[binary] (ไม่ pin เวอร์ชัน เพราะอยากได้ตัวล่าสุดที่รองรับ Python 3.13)
 - fetch_weather.py — เปลี่ยน import psycopg2 → import psycopg และเปลี่ยนทุกจุดที่เรียก psycopg2.connect(), psycopg2.OperationalError, psycopg2.Error เป็น psycopg.* แทน (ฟังก์ชันการทำงานเหมือนเดิมทุกอย่าง แค่เปลี่ยนชื่อ library)
+
 ---
 <!--
 เพิ่ม entry ใหม่ที่นี่ทุกครั้งที่ตัดสินใจอะไรสำคัญ เช่น:
