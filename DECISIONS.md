@@ -120,6 +120,8 @@ analysis_queries.sql รันบ่อยๆ ตามต้องการเ�
 
 หลักการทั่วไปที่ได้เรียนรู้: เวลาทำงานกับเวลา (datetime) ข้าม system (API → Python → Database) ควรทำให้ค่าเป็น "timezone-aware" ตั้งแต่จุดแรกที่รับ เข้ามาให้เร็วที่สุด ไม่ปล่อยให้เป็น "naive" (ไม่มี timezone กำกับ) ผ่านหลาย ขั้นตอน เพราะยิ่งปล่อยนานยิ่งเสี่ยงมีจุดใดจุดหนึ่ง "เดาผิด"
 
+---
+
 ## 10. เลือก GitHub Actions แทน Cloud Composer/Airflow สำหรับ automation
 
 ตัดสินใจ: ใช้ GitHub Actions scheduled workflow (cron) สำหรับรัน pipeline อัตโนมัติ แทนเครื่องมือ orchestration แบบเต็มรูปแบบ เช่น Airflow/Cloud Composer
