@@ -110,6 +110,33 @@ analysis_queries.sql รันบ่อยๆ ตามต้องการเ�
 
 ---
 
+## 9. ปรับปรุงเพิ่มเติม: ส่ง timezone-aware datetime object แทน string เปล่า
+
+ปัญหาที่ยังเหลืออยู่หลังแก้ข้อ 8: แม้เปลี่ยนไปขอ timezone=UTC จาก API แล้ว แต่โค้ดยังคงส่ง string เปล่าๆ (ไม่มี timezone กำกับ) เข้า database อยู่ดี เป็นการแก้ที่ปลายเหตุ ไม่ใช่ต้นเหตุ — ถ้าวันหนึ่งลืมแล้วเปลี่ยน timezone parameter กลับไปโดยไม่รู้ตัว จะกลับไปเจอบั๊กเดิมอีก
+
+วิธีแก้ที่ต้นเหตุจริงๆ: แปลง string ที่ได้จาก API ให้เป็น Python datetime object ที่มี tzinfo=timezone.utc กำกับชัดเจน ก่อน ส่งเข้า database ด้วย datetime.fromisoformat() + .replace(tzinfo=timezone.utc) เมื่อส่ง object ที่มี timezone กำกับแล้ว psycopg จะจัดการแปลงให้ database เก็บค่าถูกต้องเสมอ ไม่ต้องพึ่งการเดาของ Postgres อีกต่อไป
+
+ปรับเพิ่ม: เปลี่ยน fetched_at จากที่เคยพึ่ง DEFAULT NOW() ของ database ให้ Python เป็นคนกำหนดเองด้วย datetime.now(timezone.utc) แทน เพื่อความ สอดคล้องกันทั้งสอง column (ทั้งคู่เป็น timezone-aware object ที่มาจาก Python ทั้งหมด ไม่ผสมกันระหว่างค่าที่ database สร้างเองกับค่าที่ Python ส่งมา)
+
+หลักการทั่วไปที่ได้เรียนรู้: เวลาทำงานกับเวลา (datetime) ข้าม system (API → Python → Database) ควรทำให้ค่าเป็น "timezone-aware" ตั้งแต่จุดแรกที่รับ เข้ามาให้เร็วที่สุด ไม่ปล่อยให้เป็น "naive" (ไม่มี timezone กำกับ) ผ่านหลาย ขั้นตอน เพราะยิ่งปล่อยนานยิ่งเสี่ยงมีจุดใดจุดหนึ่ง "เดาผิด"
+
+## 10. เลือก GitHub Actions แทน Cloud Composer/Airflow สำหรับ automation
+
+ตัดสินใจ: ใช้ GitHub Actions scheduled workflow (cron) สำหรับรัน pipeline อัตโนมัติ แทนเครื่องมือ orchestration แบบเต็มรูปแบบ เช่น Airflow/Cloud Composer
+
+เหตุผล:
+
+Scope โปรเจกต์เล็ก มี pipeline เดียว ไม่มี dependency ระหว่างหลาย task ที่ซับซ้อนพอจะต้องใช้ DAG-based orchestration
+GitHub Actions ฟรีสำหรับ public repo และตั้งค่าเร็วกว่ามาก (ไม่ต้องมี server แยกไว้รัน scheduler เอง)
+อยู่ใน repo เดียวกับโค้ด ทำให้ทุกอย่างอยู่ที่เดียว ง่ายต่อการดูแล
+
+Trade-off ที่ยอมรับ: GitHub Actions ไม่มี UI สำหรับดู dependency graph ระหว่าง task แบบ Airflow ถ้าโปรเจกต์ขยายใหญ่ขึ้นมาก (หลาย pipeline ที่ต้อง รันต่อกันเป็นลำดับ) ควรพิจารณาย้ายไป Airflow/Cloud Composer จริงจัง
+
+ตั้งค่า schedule: เลือกรันทุก 1 ชั่วโมง (cron: "0 * * * *") เพราะข้อมูล อากาศจาก Open-Meteo อัปเดตทุก 15 นาทีอยู่แล้ว รันถี่กว่า 1 ชั่วโมงจะได้ข้อมูล ซ้ำซ้อนไม่คุ้มกับ resource ที่ใช้ (GitHub Actions มี quota จำกัดต่อเดือน)
+
+ความปลอดภัย: เก็บ SUPABASE_DB_URL เป็น GitHub Secret ไม่ hardcode ในไฟล์ workflow เพื่อไม่ให้ password หลุดออกไปกับโค้ดที่เป็น public repo
+
+---
 
 <!--
 เพิ่ม entry ใหม่ที่นี่ทุกครั้งที่ตัดสินใจอะไรสำคัญ เช่น:
