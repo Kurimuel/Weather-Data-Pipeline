@@ -11,7 +11,9 @@
 - [x] ทดสอบ API ใช้งานได้จริง
 - [x] ออกแบบ database schema
 - [x] เขียน script ดึงข้อมูล + เก็บลง database (manual run)
-- [ ] เพิ่ม automation (รันเองตามตาราง)
+- [x] เพิ่ม data validation ก่อนเก็บลง database
+- [x] เพิ่ม automation (รันเองตามตาราง)
+- [x] SQL analytics queries
 - [ ] Deploy + ทำ dashboard แสดงผล
 
 ## วิธีติดตั้งและรัน
