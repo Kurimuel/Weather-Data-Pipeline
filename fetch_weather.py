@@ -10,7 +10,7 @@ fetch_weather.py
 import os
 import requests
 import psycopg
-from datetime import datetime
+from datetime import datetime, timezone
 from dotenv import load_dotenv
 from validate_data import validate_weather_record
 
