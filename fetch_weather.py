@@ -12,6 +12,7 @@ import requests
 import psycopg
 from datetime import datetime
 from dotenv import load_dotenv
+from validate_data import validate_weather_record
 
 load_dotenv()  # โหลดค่าจากไฟล์ .env
 
@@ -149,6 +150,13 @@ def main():
         weather_record = parse_weather_data(raw_data, location["name"])
         if weather_record is None:
             continue
+
+        validation_errors = validate_weather_record(weather_record)
+        if validation_errors:
+            print(f"  [VALIDATION FAILED] ข้อมูลของ {location['name']} ไม่ผ่านการตรวจสอบ:")
+            for err in validation_errors:
+                print(f"    - {err}")
+            continue  # ไม่เก็บข้อมูลที่ไม่ผ่าน validation ลง database
 
         success = save_to_database(weather_record, db_url)
         if success:
