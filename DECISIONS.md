@@ -146,7 +146,7 @@ Trade-off ที่ยอมรับ: GitHub Actions ไม่มี UI สำ�
 
 ---
 
-11. Data Validation: แยกไฟล์ + คืนค่าเป็น list สะสมทุก error
+## 11. Data Validation: แยกไฟล์ + คืนค่าเป็น list สะสมทุก error
 
 ตัดสินใจ: สร้าง validate_data.py แยกจาก fetch_weather.py และออกแบบให้ validate_weather_record() คืนค่าเป็น list ของ error ทั้งหมดที่เจอ แทนที่จะ return False ทันทีที่เจอปัญหาแรก
 
@@ -166,7 +166,7 @@ Trade-off ที่ยอมรับ: ถ้าข้อมูลไม่ผ�
 
 ---
 
-12. Dashboard: เลือก Streamlit + cache 5 นาที
+## 12. Dashboard: เลือก Streamlit + cache 5 นาที
 
 ตัดสินใจ: ใช้ Streamlit ทำ dashboard แสดงผล พร้อม @st.cache_data(ttl=300)
 
