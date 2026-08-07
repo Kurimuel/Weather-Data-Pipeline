@@ -73,6 +73,10 @@ def parse_weather_data(raw_data: dict, location_name: str) -> dict | None:
     """
     try:
         current = raw_data["current"]
+
+        reading_time_naive = datetime.fromisoformat(current["time"])
+        reading_time_utc = reading_time_naive.replace(tzinfo=timezone.utc)
+        
         return {
             "location_name": location_name,
             "latitude": raw_data["latitude"],
