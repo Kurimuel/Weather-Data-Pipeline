@@ -77,7 +77,7 @@ def parse_weather_data(raw_data: dict, location_name: str) -> dict | None:
             "location_name": location_name,
             "latitude": raw_data["latitude"],
             "longitude": raw_data["longitude"],
-            "reading_time": current["time"],
+            "reading_time": reading_time_utc,
             "temperature_c": current["temperature_2m"],
             "humidity_percent": current["relative_humidity_2m"],
             "wind_speed_kmh": current["wind_speed_10m"],
