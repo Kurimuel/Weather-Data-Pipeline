@@ -4,6 +4,8 @@
 แบบอัตโนมัติ แล้วเก็บลง PostgreSQL (Supabase) เพื่อสร้างชุดข้อมูล time-series
 ที่นำไปวิเคราะห์หรือแสดงผลต่อได้
 
+Live Dashboard: https://weather-data-pipeline-fb7py9fcfze9c8dpn7u64t.streamlit.app/
+
 ดูเหตุผลของการตัดสินใจออกแบบแต่ละจุดได้ที่ [DECISIONS.md](./DECISIONS.md)
 
 ## สถานะปัจจุบัน
@@ -14,7 +16,7 @@
 - [x] เพิ่ม data validation ก่อนเก็บลง database
 - [x] เพิ่ม automation (รันเองตามตาราง)
 - [x] SQL analytics queries
-- [ ] Deploy + ทำ dashboard แสดงผล
+- [x] Deploy + ทำ dashboard แสดงผล
 
 ## วิธีติดตั้งและรัน
 
@@ -68,7 +70,8 @@ python3 fetch_weather.py
 
 ## Roadmap ถัดไป
 
-1. เพิ่ม automation ผ่าน GitHub Actions (scheduled workflow)
-2. เพิ่มเมืองอื่นนอกจากกรุงเทพฯ
-3. ทำ dashboard แสดงผลข้อมูลย้อนหลัง
-4. ทดสอบ failure scenarios (ตัด internet, ใส่พิกัดผิด) แล้วบันทึกผลใน DECISIONS.md
+1. เพิ่มเมืองอื่นนอกจากกรุงเทพฯ
+2. ทดสอบ failure scenarios (ตัด internet, ใส่พิกัดผิด) แล้วบันทึกผลใน DECISIONS.md
+3. Sync ข้อมูลไป BigQuery (OLAP layer) — ดูรายละเอียดใน DECISIONS.md
+4. เพิ่ม pgvector similarity search demo
+5. สร้าง View สำหรับแสดงเวลาไทย (Asia/Bangkok) ให้คนอื่นใช้ query ง่ายขึ้น โดยไม่กระทบข้อมูลจริงที่ยังเก็บเป็น UTC ตามมาตรฐาน
