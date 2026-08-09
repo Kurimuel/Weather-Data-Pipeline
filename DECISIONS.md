@@ -183,6 +183,28 @@ Deploy ฟรีผ่าน Streamlit Community Cloud เชื่อม GitHub
 สิ่งที่ต้องทำเพิ่มตอน deploy จริง (ยังไม่ได้ทำ): Streamlit Community Cloud ไม่อ่านไฟล์ .env เหมือนตอนรันบนเครื่อง ต้องตั้งค่า SUPABASE_DB_URL ผ่าน Streamlit Secrets Manager แทน (เมนู Settings ของ app หลัง deploy)
 
 ---
+
+13. BigQuery Sync: Incremental แทน Full Reload
+
+ตัดสินใจ: ออกแบบ bigquery_sync.py ให้ sync แบบ incremental (ดึงเฉพาะข้อมูลที่ใหม่กว่าครั้งล่าสุดที่ sync ไปแล้ว) แทนที่จะลบข้อมูลเดิม ใน BigQuery แล้วโหลดใหม่ทั้งหมดทุกครั้ง (full reload)
+
+เหตุผล:
+
+ประหยัด BigQuery quota: BigQuery คิดค่าใช้จ่ายตามปริมาณข้อมูลที่ ประมวลผล ถ้า reload ทั้งหมดทุกวัน ปริมาณข้อมูลที่ต้อง process จะโตขึ้น เรื่อยๆ ตามจำนวนข้อมูลสะสม ทั้งที่จริงๆ มีแค่ข้อมูลใหม่ไม่กี่ record ต่อรอบเท่านั้นที่ต้องเพิ่มเข้าไป
+เร็วกว่า: ยิ่งข้อมูลสะสมเยอะ ยิ่งเห็นความต่างชัดเจน (sync 24 record ใหม่ เร็วกว่า reload ข้อมูลทั้งหมดหลายพัน record มาก)
+เป็น pattern ที่ใช้จริงในงาน production: ระบบ data warehouse จริง แทบทั้งหมดใช้ incremental load ไม่ใช่ full reload เพราะ scale ไม่ได้ ถ้าข้อมูลใหญ่ขึ้นเรื่อยๆ
+
+วิธี implement: query หาค่า MAX(reading_time) ใน BigQuery ก่อน แล้ว ใช้ค่านั้นเป็นเงื่อนไข WHERE reading_time > ... ตอนดึงจาก Supabase — ถ้า BigQuery table ยังไม่มีข้อมูลเลย (sync ครั้งแรก) จะดึงข้อมูลทั้งหมดมา
+
+Trade-off ที่ยอมรับ: ถ้า record ใน Supabase ถูกแก้ไขย้อนหลัง (UPDATE) วิธีนี้จะไม่เห็นการเปลี่ยนแปลงนั้น เพราะเช็คแค่ record "ใหม่" ตาม reading_time เท่านั้น ไม่เช็คว่า record เก่ามีการแก้ไขไหม — ยอมรับได้ สำหรับโปรเจกต์นี้เพราะข้อมูลอากาศเป็น append-only โดยธรรมชาติ (ไม่มี การแก้ไขข้อมูลย้อนหลัง) ถ้าเป็นระบบที่มีการ UPDATE บ่อย ต้องใช้เทคนิค อื่น เช่น Change Data Capture (CDC) แทน
+
+ทำไมรันวันละครั้ง (ไม่ใช่ทุกชั่วโมงเหมือน fetch_weather.yml): BigQuery เหมาะกับการวิเคราะห์ข้อมูลก้อนใหญ่เป็นรอบ ไม่จำเป็นต้อง real-time เท่า operational database (Supabase) — ตอกย้ำหลักการแยก บทบาท OLTP vs OLAP ที่วางไว้ตั้งแต่ตัดสินใจข้อ 12
+
+ความปลอดภัย: เก็บ Service Account JSON key เป็น GitHub Secret (GCP_SERVICE_ACCOUNT_KEY) แล้วเขียนเป็นไฟล์ชั่วคราวตอนรัน workflow เท่านั้น ลบทิ้งทันทีหลังรันเสร็จ (step "Clean up credentials file" ที่ รันเสมอแม้ step ก่อนหน้าจะ fail ด้วย if: always())
+
+---
+
+
 <!--
 เพิ่ม entry ใหม่ที่นี่ทุกครั้งที่ตัดสินใจอะไรสำคัญ เช่น:
 - ทำไมเลือก error handling แบบนี้
