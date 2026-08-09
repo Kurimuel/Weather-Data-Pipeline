@@ -184,7 +184,7 @@ Deploy ฟรีผ่าน Streamlit Community Cloud เชื่อม GitHub
 
 ---
 
-13. BigQuery Sync: Incremental แทน Full Reload
+## 13. BigQuery Sync: Incremental แทน Full Reload
 
 ตัดสินใจ: ออกแบบ bigquery_sync.py ให้ sync แบบ incremental (ดึงเฉพาะข้อมูลที่ใหม่กว่าครั้งล่าสุดที่ sync ไปแล้ว) แทนที่จะลบข้อมูลเดิม ใน BigQuery แล้วโหลดใหม่ทั้งหมดทุกครั้ง (full reload)
 
