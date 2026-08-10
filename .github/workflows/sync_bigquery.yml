@@ -1,0 +1,41 @@
+name: Sync to BigQuery
+
+# รันวันละครั้ง (ต่างจาก fetch_weather.yml ที่รันทุกชั่วโมง เพราะ
+# BigQuery เหมาะกับการวิเคราะห์ข้อมูลก้อนใหญ่เป็นรอบ ไม่ต้อง real-time
+# เท่า OLTP database) + กดรันเองได้ตอนทดสอบ
+on:
+  schedule:
+    - cron: "17 2 * * *"  # 02:17 UTC ทุกวัน (นาทีสุ่ม เลี่ยง peak load เหมือน workflow อื่น)
+  workflow_dispatch:
+
+jobs:
+  sync-bigquery:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Write GCP service account key
+        run: echo '${{ secrets.GCP_SERVICE_ACCOUNT_KEY }}' > gcp-service-account-key.json
+
+      - name: Run BigQuery sync
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          GOOGLE_APPLICATION_CREDENTIALS: ./gcp-service-account-key.json
+          BQ_PROJECT_ID: ${{ secrets.BQ_PROJECT_ID }}
+          BQ_DATASET: weather_pipeline
+          BQ_TABLE: weather_readings
+        run: python bigquery_sync.py
+
+      - name: Clean up credentials file
+        if: always()
+        run: rm -f gcp-service-account-key.json
