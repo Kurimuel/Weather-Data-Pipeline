@@ -18,12 +18,26 @@ load_dotenv()  # โหลดค่าจากไฟล์ .env
 
 # --------------------------------------------------------------------------
 # ตั้งค่าเมือง/พิกัดที่จะดึงข้อมูล
-# เก็บเป็น list ตั้งแต่ต้น เผื่ออนาคตอยากเพิ่มเมืองอื่น ไม่ต้องแก้โครงสร้างโค้ด
+# ผสมทั้งเมืองในไทยและทั่วโลก เพื่อทดสอบว่า pipeline รองรับ scale ได้จริง
 # --------------------------------------------------------------------------
 LOCATIONS = [
-    {"name": "Bangkok", "lat": 13.7563, "lon": 100.5018},
-    # เพิ่มเมืองอื่นได้ที่นี่ เช่น:
-    # {"name": "Chiang Mai", "lat": 18.7883, "lon": 98.9853},
+    # ประเทศไทย
+    {"name": "Bangkok", "country": "Thailand", "lat": 13.7563, "lon": 100.5018},
+    {"name": "Chiang Mai", "country": "Thailand", "lat": 18.7883, "lon": 98.9853},
+    {"name": "Phuket", "country": "Thailand", "lat": 7.8804, "lon": 98.3923},
+    {"name": "Khon Kaen", "country": "Thailand", "lat": 16.4419, "lon": 102.8360},
+    # เอเชีย
+    {"name": "Tokyo", "country": "Japan", "lat": 35.6762, "lon": 139.6503},
+    {"name": "Singapore", "country": "Singapore", "lat": 1.3521, "lon": 103.8198},
+    {"name": "Seoul", "country": "South Korea", "lat": 37.5665, "lon": 126.9780},
+    # ยุโรป
+    {"name": "London", "country": "United Kingdom", "lat": 51.5074, "lon": -0.1278},
+    {"name": "Paris", "country": "France", "lat": 48.8566, "lon": 2.3522},
+    # อเมริกา
+    {"name": "New York", "country": "United States", "lat": 40.7128, "lon": -74.0060},
+    {"name": "Sao Paulo", "country": "Brazil", "lat": -23.5505, "lon": -46.6333},
+    # โอเชียเนีย
+    {"name": "Sydney", "country": "Australia", "lat": -33.8688, "lon": 151.2093},
 ]
 
 API_BASE_URL = "https://api.open-meteo.com/v1/forecast"
@@ -63,22 +77,32 @@ def fetch_weather_for_location(location: dict) -> dict | None:
         return None
 
 
-def parse_weather_data(raw_data: dict, location_name: str) -> dict | None:
+def parse_weather_data(raw_data: dict, location: dict) -> dict | None:
     """
     แปลงข้อมูลดิบจาก API ให้อยู่ในรูปแบบที่พร้อมเก็บลง database
 
     แยกฟังก์ชันนี้ออกจาก fetch_weather_for_location() ตั้งใจ เพราะถ้าวันหนึ่ง
     เปลี่ยนไปใช้ API เจ้าอื่น (field ชื่อไม่เหมือนกัน) จะแก้แค่ฟังก์ชันนี้
     ฟังก์ชัน fetch และฟังก์ชันที่ insert เข้า database ไม่ต้องแก้เลย
+
+    รับ location เป็น dict เต็ม (ไม่ใช่แค่ location_name) เพราะหลัง
+    normalize schema (ดู DECISIONS.md ข้อ 15) ต้องใช้ country ด้วยตอน
+    get-or-create record ในตาราง locations
     """
     try:
         current = raw_data["current"]
 
+        # API ขอเป็น UTC แล้ว (ดู params ด้านบน) แต่ค่าที่ได้มายังเป็น
+        # string เปล่าๆ ไม่มี timezone กำกับ เช่น "2026-08-04T14:15"
+        # ต้องแปลงเป็น datetime object ที่มี tzinfo=UTC ชัดเจนก่อน
+        # ไม่งั้น Postgres จะเดา timezone เอง (เคยเกิดบั๊กจากจุดนี้มาแล้ว
+        # ดู DECISIONS.md ข้อ 8)
         reading_time_naive = datetime.fromisoformat(current["time"])
         reading_time_utc = reading_time_naive.replace(tzinfo=timezone.utc)
-        
+
         return {
-            "location_name": location_name,
+            "location_name": location["name"],
+            "country": location.get("country"),
             "latitude": raw_data["latitude"],
             "longitude": raw_data["longitude"],
             "reading_time": reading_time_utc,
@@ -93,33 +117,66 @@ def parse_weather_data(raw_data: dict, location_name: str) -> dict | None:
         return None
 
 
+def get_or_create_location_id(cursor, weather_record: dict) -> int:
+    """
+    หา id ของเมืองนี้ในตาราง locations ถ้ายังไม่มีให้สร้างใหม่ (upsert)
+
+    ใช้ ON CONFLICT ... DO UPDATE แทน DO NOTHING เพราะ DO NOTHING จะไม่คืนค่า
+    RETURNING เวลาที่เจอ conflict (แถวมีอยู่แล้ว) การ DO UPDATE แบบ "no-op"
+    (set ค่าตัวเองใส่ตัวเอง) ทำให้ RETURNING ทำงานได้ทุกกรณี ไม่ว่าจะเป็น
+    แถวใหม่หรือแถวเดิมที่มีอยู่แล้ว - ได้ id กลับมาเสมอในคำสั่งเดียว
+    """
+    upsert_query = """
+        INSERT INTO locations (name, country, latitude, longitude)
+        VALUES (%s, %s, %s, %s)
+        ON CONFLICT (name) DO UPDATE SET name = EXCLUDED.name
+        RETURNING id;
+    """
+    cursor.execute(upsert_query, (
+        weather_record["location_name"],
+        weather_record["country"],
+        weather_record["latitude"],
+        weather_record["longitude"],
+    ))
+    return cursor.fetchone()[0]
+
+
 def save_to_database(weather_record: dict, db_url: str) -> bool:
     """
     เก็บข้อมูล 1 record เข้า Supabase
 
-    ใช้ ON CONFLICT DO NOTHING เพื่อป้องกันข้อมูลซ้ำ ถ้ารัน pipeline ซ้ำ
-    ในช่วงเวลาเดียวกัน (ตรงกับ UNIQUE constraint ที่ตั้งไว้ใน schema.sql)
+    ทำ 2 ขั้นตอนในการเชื่อมต่อเดียวกัน (transaction เดียวกัน):
+    1. get-or-create location_id จากตาราง locations
+    2. insert ข้อมูลอากาศเข้า weather_readings โดยอ้างอิง location_id
+
+    ใช้ ON CONFLICT DO NOTHING ตอน insert weather_readings เพื่อป้องกัน
+    ข้อมูลซ้ำ ถ้ารัน pipeline ซ้ำในช่วงเวลาเดียวกัน (ตรงกับ UNIQUE
+    constraint ที่ตั้งไว้ใน schema.sql)
     """
     insert_query = """
         INSERT INTO weather_readings
-            (location_name, latitude, longitude, reading_time,
-             temperature_c, humidity_percent, wind_speed_kmh)
-        VALUES (%s, %s, %s, %s, %s, %s, %s)
-        ON CONFLICT (location_name, reading_time) DO NOTHING;
+            (location_id, reading_time, temperature_c,
+             humidity_percent, wind_speed_kmh, fetched_at)
+        VALUES (%s, %s, %s, %s, %s, %s)
+        ON CONFLICT (location_id, reading_time) DO NOTHING;
     """
+
+    fetched_at_utc = datetime.now(timezone.utc)
 
     conn = None
     try:
         conn = psycopg.connect(db_url)
         cursor = conn.cursor()
+
+        location_id = get_or_create_location_id(cursor, weather_record)
+
         cursor.execute(insert_query, (
-            weather_record["location_name"],
-            weather_record["latitude"],
-            weather_record["longitude"],
+            location_id,
             weather_record["reading_time"],
             weather_record["temperature_c"],
             weather_record["humidity_percent"],
             weather_record["wind_speed_kmh"],
+            fetched_at_utc,
         ))
         conn.commit()
         cursor.close()
@@ -151,7 +208,7 @@ def main():
         if raw_data is None:
             continue  # ข้ามไปเมืองถัดไป ไม่ทำให้ทั้ง pipeline ล้ม
 
-        weather_record = parse_weather_data(raw_data, location["name"])
+        weather_record = parse_weather_data(raw_data, location)
         if weather_record is None:
             continue
 
