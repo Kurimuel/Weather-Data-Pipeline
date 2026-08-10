@@ -18,7 +18,7 @@ st.set_page_config(page_title="Weather Data Pipeline", page_icon="🌤️", layo
 
 @st.cache_data(ttl=300)  # cache ไว้ 5 นาที ไม่ต้อง query database ทุกครั้งที่ผู้ใช้ interact
 def load_weather_data() -> pd.DataFrame:
-    """ดึงข้อมูลทั้งหมดจาก Supabase มาเป็น DataFrame"""
+    """ดึงข้อมูลทั้งหมดจาก Supabase มาเป็น DataFrame (JOIN กับ locations)"""
     db_url = os.getenv("SUPABASE_DB_URL")
     if not db_url:
         st.error("ไม่พบ SUPABASE_DB_URL — ตั้งค่าใน .env (รันบนเครื่อง) "
@@ -26,10 +26,12 @@ def load_weather_data() -> pd.DataFrame:
         st.stop()
 
     query = """
-        SELECT location_name, reading_time, temperature_c,
-               humidity_percent, wind_speed_kmh, fetched_at
-        FROM weather_readings
-        ORDER BY reading_time ASC;
+        SELECT l.name AS location_name, l.country,
+               wr.reading_time, wr.temperature_c,
+               wr.humidity_percent, wr.wind_speed_kmh, wr.fetched_at
+        FROM weather_readings wr
+        JOIN locations l ON wr.location_id = l.id
+        ORDER BY wr.reading_time ASC;
     """
     with psycopg.connect(db_url) as conn:
         df = pd.read_sql(query, conn)
@@ -46,12 +48,21 @@ if df.empty:
     st.stop()
 
 # --------------------------------------------------------------------------
-# ตัวกรองเมือง (รองรับหลายเมืองในอนาคตตามที่ออกแบบไว้ใน LOCATIONS list)
+# ตัวกรองประเทศ + เมือง (รองรับหลายเมืองทั่วโลกตามที่ขยาย LOCATIONS แล้ว)
 # --------------------------------------------------------------------------
-locations = sorted(df["location_name"].unique())
-selected_location = st.selectbox("เลือกเมือง", locations)
+col_country, col_city = st.columns(2)
 
-filtered_df = df[df["location_name"] == selected_location]
+with col_country:
+    countries = sorted(df["country"].dropna().unique())
+    selected_country = st.selectbox("เลือกประเทศ", ["ทั้งหมด"] + countries)
+
+df_by_country = df if selected_country == "ทั้งหมด" else df[df["country"] == selected_country]
+
+with col_city:
+    locations = sorted(df_by_country["location_name"].unique())
+    selected_location = st.selectbox("เลือกเมือง", locations)
+
+filtered_df = df_by_country[df_by_country["location_name"] == selected_location]
 
 # --------------------------------------------------------------------------
 # ตัวเลขสรุปล่าสุด
