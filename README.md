@@ -91,7 +91,13 @@ BigQuery ── วิเคราะห์ข้อมูลก้อนให�
 
 ถ้ามีข้อมูลอยู่แล้วจากเวอร์ชันก่อน normalize: รัน migration_001_normalize_locations.sql แทน (มีคำแนะนำละเอียดในไฟล์ว่าควรเช็คผลลัพธ์ระหว่างทางตรงไหนบ้าง ก่อนจะลบ column เดิมทิ้งจริง)
 
-
+การตั้งค่า BigQuery
+1. สร้าง Google Cloud Project + เปิดใช้ BigQuery API
+2. สร้าง Service Account ให้สิทธิ์ BigQuery Data Editor
+3. ดาวน์โหลด JSON key ของ Service Account (ห้าม commit ขึ้น GitHub)
+4. สร้าง dataset ชื่อ weather_pipeline ใน BigQuery
+5. ตั้งค่าใน .env: GOOGLE_APPLICATION_CREDENTIALS, BQ_PROJECT_ID
+6. รัน python bigquery_sync.py เพื่อ sync ครั้งแรก
 
 ## Roadmap ถัดไป
 
