@@ -69,6 +69,20 @@ python3 fetch_weather.py
 
 ไม่ต้องใช้ API key สำหรับการใช้งานแบบ non-commercial
 
+## Architecture
+
+Open-Meteo API
+      │ fetch ทุก 1 ชม. (GitHub Actions)
+      ▼
+validate_data.py
+      ▼
+Supabase (PostgreSQL) ── เก็บข้อมูลสด (OLTP)
+      │ sync วันละครั้ง (GitHub Actions)
+      ▼
+BigQuery ── วิเคราะห์ข้อมูลก้อนใหญ่ (OLAP)
+
+ดูเหตุผลของการแยก OLTP/OLAP ได้ที่ DECISIONS.md ข้อ 12-13
+
 ## Roadmap ถัดไป
 
 1. เพิ่มเมืองอื่นนอกจากกรุงเทพฯ
