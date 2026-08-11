@@ -8,6 +8,7 @@ fetch_weather.py
 """
 
 import os
+import time
 import requests
 import psycopg
 from datetime import datetime, timezone
@@ -43,11 +44,17 @@ LOCATIONS = [
 API_BASE_URL = "https://api.open-meteo.com/v1/forecast"
 
 
-def fetch_weather_for_location(location: dict) -> dict | None:
+def fetch_weather_for_location(location: dict, max_retries: int = 1) -> dict | None:
     """
     ดึงข้อมูลสภาพอากาศปัจจุบันของ 1 พิกัด จาก Open-Meteo API
 
     คืนค่า: dict ของข้อมูลอากาศ ถ้าสำเร็จ, None ถ้าล้มเหลว
+
+    มี retry เมื่อเจอ timeout เพราะจากการใช้งานจริงพบว่า timeout ส่วนใหญ่
+    เป็นปัญหาเครือข่ายแบบสุ่ม (transient) ไม่ใช่ปัญหาถาวรของ API หรือ
+    พิกัดที่ขอ (สังเกตจาก log จริง: เมืองที่ timeout เปลี่ยนไปเรื่อยๆ ทุก
+    รอบ ไม่ใช่เมืองเดิมซ้ำ - ดู DECISIONS.md ข้อ 17) ลอง retry อีกครั้ง
+    ก่อนจะยอมแพ้ มีโอกาสสูงที่จะสำเร็จในรอบที่ 2
     """
     params = {
         "latitude": location["lat"],
@@ -56,25 +63,32 @@ def fetch_weather_for_location(location: dict) -> dict | None:
         "timezone": "UTC",
     }
 
-    try:
-        response = requests.get(API_BASE_URL, params=params, timeout=10)
-        response.raise_for_status()  # จะ raise error ถ้า status code ไม่ใช่ 200
-        data = response.json()
-        return data
+    for attempt in range(1, max_retries + 2):  # +2 = พยายามครั้งแรก + retry
+        try:
+            response = requests.get(API_BASE_URL, params=params, timeout=15)
+            response.raise_for_status()
+            return response.json()
 
-    except requests.exceptions.Timeout:
-        print(f"[ERROR] Timeout ตอนดึงข้อมูลของ {location['name']} (รอเกิน 10 วินาที)")
-        return None
-    except requests.exceptions.ConnectionError:
-        print(f"[ERROR] เชื่อมต่อ internet ไม่ได้ ตอนดึงข้อมูลของ {location['name']}")
-        return None
-    except requests.exceptions.HTTPError as e:
-        print(f"[ERROR] API ตอบกลับมาเป็น error สำหรับ {location['name']}: {e}")
-        return None
-    except ValueError:
-        # กรณี response ไม่ใช่ JSON ที่ถูกต้อง (parse ไม่ได้)
-        print(f"[ERROR] แปลง response เป็น JSON ไม่ได้ สำหรับ {location['name']}")
-        return None
+        except requests.exceptions.Timeout:
+            if attempt <= max_retries:
+                print(f"[WARNING] Timeout ตอนดึงข้อมูลของ {location['name']} "
+                      f"(ครั้งที่ {attempt}) กำลังลองใหม่...")
+                time.sleep(2)
+                continue
+            print(f"[ERROR] Timeout ตอนดึงข้อมูลของ {location['name']} "
+                  f"(รอเกิน 15 วินาที หลังลอง {attempt} ครั้ง)")
+            return None
+        except requests.exceptions.ConnectionError:
+            print(f"[ERROR] เชื่อมต่อ internet ไม่ได้ ตอนดึงข้อมูลของ {location['name']}")
+            return None
+        except requests.exceptions.HTTPError as e:
+            print(f"[ERROR] API ตอบกลับมาเป็น error สำหรับ {location['name']}: {e}")
+            return None
+        except ValueError:
+            print(f"[ERROR] แปลง response เป็น JSON ไม่ได้ สำหรับ {location['name']}")
+            return None
+
+    return None
 
 
 def parse_weather_data(raw_data: dict, location: dict) -> dict | None:
@@ -119,20 +133,28 @@ def parse_weather_data(raw_data: dict, location: dict) -> dict | None:
 
 def get_or_create_location_id(cursor, weather_record: dict) -> int:
     """
-    หา id ของเมืองนี้ในตาราง locations ถ้ายังไม่มีให้สร้างใหม่ (upsert)
+    หา id ของเมืองนี้ในตาราง locations ถ้ายังไม่มีให้สร้างใหม่
 
-    ใช้ ON CONFLICT ... DO UPDATE แทน DO NOTHING เพราะ DO NOTHING จะไม่คืนค่า
-    RETURNING เวลาที่เจอ conflict (แถวมีอยู่แล้ว) การ DO UPDATE แบบ "no-op"
-    (set ค่าตัวเองใส่ตัวเอง) ทำให้ RETURNING ทำงานได้ทุกกรณี ไม่ว่าจะเป็น
-    แถวใหม่หรือแถวเดิมที่มีอยู่แล้ว - ได้ id กลับมาเสมอในคำสั่งเดียว
+    เช็คด้วย SELECT ก่อนเสมอ แทนที่จะพยายาม INSERT ทุกครั้งแล้วพึ่ง
+    ON CONFLICT เพราะ PostgreSQL จะ "เผา" เลข SERIAL ทิ้งทุกครั้งที่มีการ
+    พยายาม INSERT แม้จะไปชน ON CONFLICT แล้วเปลี่ยนเป็น UPDATE ก็ตาม
+    (ดู DECISIONS.md ข้อ 17) ถ้าเรียกฟังก์ชันนี้ทุกชั่วโมงสำหรับเมืองที่
+    มีอยู่แล้ว จะทำให้เลข id กระโดดขึ้นเรื่อยๆ อย่างไม่จำเป็น การ SELECT
+    ก่อนช่วยให้ INSERT เกิดขึ้นเฉพาะตอนที่เป็นเมืองใหม่จริงๆ เท่านั้น
     """
-    upsert_query = """
+    select_query = "SELECT id FROM locations WHERE name = %s;"
+    cursor.execute(select_query, (weather_record["location_name"],))
+    row = cursor.fetchone()
+    if row is not None:
+        return row[0]
+
+    insert_query = """
         INSERT INTO locations (name, country, latitude, longitude)
         VALUES (%s, %s, %s, %s)
         ON CONFLICT (name) DO UPDATE SET name = EXCLUDED.name
         RETURNING id;
     """
-    cursor.execute(upsert_query, (
+    cursor.execute(insert_query, (
         weather_record["location_name"],
         weather_record["country"],
         weather_record["latitude"],
@@ -225,6 +247,9 @@ def main():
                   f"ความชื้น {weather_record['humidity_percent']}%")
         else:
             print(f"  บันทึกไม่สำเร็จสำหรับ {location['name']}")
+
+        time.sleep(1)  # หน่วงเวลาก่อนไปเมืองถัดไป ลดโอกาสโดน rate limit/timeout
+        # จากการยิง request รัวติดกันเร็วเกินไป (ดู DECISIONS.md ข้อ 17)
 
     print(f"\n=== เสร็จสิ้น ({datetime.now().isoformat()}) ===")
 
