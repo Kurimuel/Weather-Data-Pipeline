@@ -17,6 +17,7 @@ Live Dashboard: https://weather-data-pipeline-fb7py9fcfze9c8dpn7u64t.streamlit.a
 - [x] เพิ่ม automation (รันเองตามตาราง)
 - [x] SQL analytics queries
 - [x] Deploy + ทำ dashboard แสดงผล
+- [x] BigQuery sync (OLAP layer)
 
 ## วิธีติดตั้งและรัน
 
