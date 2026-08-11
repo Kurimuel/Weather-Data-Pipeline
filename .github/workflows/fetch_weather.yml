@@ -3,7 +3,7 @@ name: Fetch Weather Data
 # รันอัตโนมัติทุก 1 ชั่วโมง + สามารถกดรันเองได้จากหน้า GitHub (workflow_dispatch)
 on:
   schedule:
-    - cron: "23 * * * *"  # นาทีที่ 0 ของทุกชั่วโมง (เวลา UTC)
+    - cron: "23 * * * *"  # นาทีที่ 23 ของทุกชั่วโมง (เวลา UTC)
   workflow_dispatch:       # ปุ่ม "Run workflow" กดรันเองได้ตอนทดสอบ
 
 jobs:
