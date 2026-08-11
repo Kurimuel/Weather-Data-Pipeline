@@ -99,6 +99,8 @@ BigQuery ── วิเคราะห์ข้อมูลก้อนให�
 5. ตั้งค่าใน .env: GOOGLE_APPLICATION_CREDENTIALS, BQ_PROJECT_ID
 6. รัน python bigquery_sync.py เพื่อ sync ครั้งแรก
 
+Query ตัวอย่างสำหรับ BigQuery dialect ดูได้ที่ bigquery_analysis_queries.sql
+
 ## Roadmap ถัดไป
 
 1. เพิ่มเมืองอื่นนอกจากกรุงเทพฯ
