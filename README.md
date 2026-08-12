@@ -103,8 +103,6 @@ Query ตัวอย่างสำหรับ BigQuery dialect ดูได�
 
 ## Roadmap ถัดไป
 
-1. เพิ่มเมืองอื่นนอกจากกรุงเทพฯ
-2. ทดสอบ failure scenarios (ตัด internet, ใส่พิกัดผิด) แล้วบันทึกผลใน DECISIONS.md
-3. Sync ข้อมูลไป BigQuery (OLAP layer) — ดูรายละเอียดใน DECISIONS.md
-4. เพิ่ม pgvector similarity search demo
-5. สร้าง View สำหรับแสดงเวลาไทย (Asia/Bangkok) ให้คนอื่นใช้ query ง่ายขึ้น โดยไม่กระทบข้อมูลจริงที่ยังเก็บเป็น UTC ตามมาตรฐาน
+1. ทดสอบ failure scenarios (ตัด internet, ใส่พิกัดผิด) แล้วบันทึกผลใน DECISIONS.md
+2. เพิ่ม pgvector similarity search demo
+3. สร้าง View สำหรับแสดงเวลาไทย (Asia/Bangkok) ให้คนอื่นใช้ query ง่ายขึ้น โดยไม่กระทบข้อมูลจริงที่ยังเก็บเป็น UTC ตามมาตรฐาน
