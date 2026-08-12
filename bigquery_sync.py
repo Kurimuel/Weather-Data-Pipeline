@@ -88,10 +88,31 @@ def fetch_new_records_from_supabase(since: datetime | None) -> pd.DataFrame:
 
 
 def sync_to_bigquery(df: pd.DataFrame, bq_client: bigquery.Client, table_ref: str):
-    """เขียนข้อมูลเข้า BigQuery แบบ append (ไม่เขียนทับของเดิม)"""
+    """
+    เขียนข้อมูลเข้า BigQuery แบบ append (ไม่เขียนทับของเดิม)
+
+    กำหนด schema เองชัดเจนแทนที่จะใช้ autodetect=True เพราะเคยเจอปัญหา
+    จริง: autodetect เดา schema ผิดตอน sync ครั้งแรก (เดา column country
+    เป็น int64 แทนที่จะเป็น string) ทำให้ sync ครั้งถัดๆ มาพังเพราะข้อมูล
+    จริงเป็น string แต่ table ถูกล็อก schema แบบผิดไปแล้ว (ดู DECISIONS.md
+    ข้อ 18) การกำหนด schema เองตั้งแต่ต้นทำให้ type ถูกต้องเสมอ ไม่ขึ้นกับ
+    การเดาจากข้อมูลตัวอย่างที่อาจกำกวม
+    """
+    schema = [
+        bigquery.SchemaField("location_name", "STRING"),
+        bigquery.SchemaField("country", "STRING"),
+        bigquery.SchemaField("latitude", "FLOAT64"),
+        bigquery.SchemaField("longitude", "FLOAT64"),
+        bigquery.SchemaField("reading_time", "TIMESTAMP"),
+        bigquery.SchemaField("temperature_c", "FLOAT64"),
+        bigquery.SchemaField("humidity_percent", "INTEGER"),
+        bigquery.SchemaField("wind_speed_kmh", "FLOAT64"),
+        bigquery.SchemaField("fetched_at", "TIMESTAMP"),
+    ]
+
     job_config = bigquery.LoadJobConfig(
         write_disposition=bigquery.WriteDisposition.WRITE_APPEND,
-        autodetect=True,  # ให้ BigQuery เดา schema จาก DataFrame อัตโนมัติ
+        schema=schema,
     )
     load_job = bq_client.load_table_from_dataframe(df, table_ref, job_config=job_config)
     load_job.result()  # รอจนกว่า job จะเสร็จ
