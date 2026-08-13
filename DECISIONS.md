@@ -298,6 +298,32 @@ Trade-off ที่ยอมรับ: pipeline ใช้เวลารัน�
 
 ---
 
+## 19. pgvector Demo: rule-based description + embedding model ฟรี
+
+ตัดสินใจ: ทำ AI/vector search demo แบบง่าย ประกอบด้วย 3 ส่วน: (1) แปลงข้อมูลตัวเลขเป็น text description ด้วยกฎง่ายๆ (rule-based) (2) แปลง text เป็น vector ด้วย sentence-transformers (ฟรี รันบนเครื่อง) (3) ค้นหาความคล้ายด้วย pgvector cosine distance
+
+เหตุผลที่ใช้ rule-based แทน LLM สำหรับสร้าง description:
+
+- จุดประสงค์ของ demo นี้คือแสดงหลักการของ "แปลงข้อมูล → embedding → similarity search" ไม่ใช่การทำ natural language generation ที่ซับซ้อน
+- Rule-based ควบคุมได้ ทดสอบได้ง่าย (unit test ได้ตรงไปตรงมา) และไม่มี ค่าใช้จ่ายหรือ dependency ภายนอกเพิ่ม
+- ถ้าต้องการ sophistication มากกว่านี้ในอนาคต สามารถเปลี่ยนแค่ฟังก์ชัน describe_weather() เป็นเรียก LLM แทนได้ โดยไม่กระทบส่วน embedding/ search ที่เหลือเลย (แยก concern ไว้ชัดเจน)
+
+เหตุผลที่เลือก sentence-transformers (ฟรี, รันบนเครื่อง) แทน OpenAI/Anthropic embedding API:
+
+- ไม่มีค่าใช้จ่าย เหมาะกับ portfolio project ที่ไม่ต้องการผูก API key ที่มีค่าใช้จ่ายเพิ่ม
+- Model all-MiniLM-L6-v2 ขนาดเล็ก (~80MB) เพียงพอสำหรับ demo ระดับนี้ แม้จะไม่แม่นยำเท่า model ใหญ่ระดับ production
+
+เหตุผลที่เลือก vector ขนาด 384 มิติ: ตรงกับขนาด output ของ model all-MiniLM-L6-v2 ที่เลือกใช้ - ต้อง match กันเป๊ะระหว่าง column vector(384) ใน schema กับ model ที่ใช้จริง ถ้าเปลี่ยน model ในอนาคต ต้องแก้ทั้งสองจุดให้ตรงกัน
+
+เหตุผลที่ใช้ ivfflat index: pgvector รองรับหลาย index type สำหรับ approximate nearest neighbor search, เลือก ivfflat เพราะเป็นตัวที่ตั้งค่า ง่ายที่สุดและเพียงพอสำหรับข้อมูลขนาดเล็ก-กลาง (หลักพัน-หมื่นแถว) ถ้า ข้อมูลโตขึ้นมากในอนาคต (หลักล้านแถว) ควรพิจารณา HNSW index แทน ซึ่งค้นหา เร็วกว่าแต่ใช้ resource ตอนสร้าง index มากกว่า
+
+เชื่อมโยงกับ RAG (ตามที่ JD ของ Arise พูดถึง): demo นี้แสดงหลักการ เดียวกับที่ RAG ใช้ (แปลงข้อมูลเป็น embedding แล้วค้นหาด้วยความใกล้เคียง เชิงความหมาย แทนการค้นหาด้วยคำที่ตรงกันเป๊ะแบบ keyword search) แม้จะไม่ใช่ ระบบ RAG เต็มรูปแบบ (ไม่มีส่วน generation ที่ป้อน retrieved context กลับ เข้า LLM) แต่แสดงว่าเข้าใจ building block พื้นฐานที่ RAG ใช้อยู่
+
+Trade-off ที่ยอมรับ: rule-based description มีความหลากหลายจำกัด (แค่ไม่กี่สิบ combination ที่เป็นไปได้) ทำให้ similarity search มักเจอ reading ที่ description เหมือนกันเป๊ะมากกว่าจะเจอความคล้ายแบบละเอียดอ่อน
+
+ยอมรับได้เพราะเป้าหมายคือสาธิตหลักการทำงาน ไม่ใช่ทำระบบค้นหาที่แม่นยำ ระดับ production
+
+---
 
 <!--
 เพิ่ม entry ใหม่ที่นี่ทุกครั้งที่ตัดสินใจอะไรสำคัญ เช่น:
