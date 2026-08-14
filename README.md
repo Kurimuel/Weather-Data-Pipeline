@@ -18,6 +18,7 @@ Live Dashboard: https://weather-data-pipeline-fb7py9fcfze9c8dpn7u64t.streamlit.a
 - [x] SQL analytics queries
 - [x] Deploy + ทำ dashboard แสดงผล
 - [x] BigQuery sync (OLAP layer)
+- [x] pgvector similarity search demo
 
 ## วิธีติดตั้งและรัน
 
