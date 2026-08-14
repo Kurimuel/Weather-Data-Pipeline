@@ -102,6 +102,22 @@ BigQuery ── วิเคราะห์ข้อมูลก้อนให�
 
 Query ตัวอย่างสำหรับ BigQuery dialect ดูได้ที่ bigquery_analysis_queries.sql
 
+## AI / Vector Search Demo 
+1. รัน migration_002_add_pgvector.sql ใน Supabase SQL Editor (เปิด pgvector extension + เพิ่ม column)
+2. สร้าง embedding ให้ข้อมูลที่มีอยู่:
+
+```
+   python3 weather_embeddings.py --generate
+```
+
+3. ค้นหาสภาพอากาศที่คล้ายกัน:
+
+```
+   python3 weather_embeddings.py --search "Bangkok"
+```
+
+ดูเหตุผลของการออกแบบ (ทำไมเลือก rule-based description, ทำไมเลือก model ขนาดเล็ก, ความเชื่อมโยงกับ RAG) ได้ที่ DECISIONS.md ข้อ 19
+
 ## Roadmap ถัดไป
 
 1. ทดสอบ failure scenarios (ตัด internet, ใส่พิกัดผิด) แล้วบันทึกผลใน DECISIONS.md
