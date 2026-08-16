@@ -118,8 +118,23 @@ Query ตัวอย่างสำหรับ BigQuery dialect ดูได�
 
 ดูเหตุผลของการออกแบบ (ทำไมเลือก rule-based description, ทำไมเลือก model ขนาดเล็ก, ความเชื่อมโยงกับ RAG) ได้ที่ DECISIONS.md ข้อ 19
 
+## Power BI Dashboard
+
+นอกจาก Streamlit dashboard ที่ deploy จริง (ลิงก์ด้านบน) ยังทำ Power BI
+report แยกต่างหาก เพื่อแสดงทักษะ BI tools + DAX โดยเฉพาะ เชื่อมต่อตรงกับ
+Supabase (PostgreSQL) ผ่าน Import mode
+
+![Power BI Dashboard](./screenshots/powerbi_dashboard.png)
+
+**หมายเหตุ:** ไม่มีลิงก์ live เพราะฟีเจอร์ "Publish to web" ของ Power BI
+ต้องใช้ Microsoft work/school account (organizational email) ซึ่งไม่มีใน
+personal/free account — เป็นข้อจำกัดของ license ไม่ใช่ของโปรเจกต์
+
+DAX measures ที่ใช้: `Avg Temperature`, `Avg Temperature (All Locations)`,
+`Temp vs Global Avg` (ใช้ CALCULATE + ALL() สำหรับ context transition),
+`Reading Count`
+
 ## Roadmap ถัดไป
 
 1. ทดสอบ failure scenarios (ตัด internet, ใส่พิกัดผิด) แล้วบันทึกผลใน DECISIONS.md
-2. เพิ่ม pgvector similarity search demo
-3. สร้าง View สำหรับแสดงเวลาไทย (Asia/Bangkok) ให้คนอื่นใช้ query ง่ายขึ้น โดยไม่กระทบข้อมูลจริงที่ยังเก็บเป็น UTC ตามมาตรฐาน
+2. สร้าง View สำหรับแสดงเวลาไทย (Asia/Bangkok) ให้คนอื่นใช้ query ง่ายขึ้น โดยไม่กระทบข้อมูลจริงที่ยังเก็บเป็น UTC ตามมาตรฐาน
