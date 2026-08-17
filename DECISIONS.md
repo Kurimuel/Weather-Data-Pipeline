@@ -328,7 +328,7 @@ Trade-off ที่ยอมรับ: rule-based description มีความ
 ## 20. Power BI: เพิ่มเพื่อปิดช่องว่างสำหรับ JD ที่เน้น BI Tools
 
 ตัดสินใจ: เพิ่ม Power BI report แยกจาก Streamlit dashboard หลังพบว่า
-JD บางบริษัท (เช่น Icube) เน้น BI Tools (PowerBI/Tableau) + DAX โดยเฉพาะ
+JD บางบริษัท เน้น BI Tools (PowerBI/Tableau) + DAX โดยเฉพาะ
 ซึ่ง Streamlit ไม่ตอบโจทย์นี้ตรงๆ
 
 เหตุผล: ทักษะ BI tool เป็นคนละชุดกับ full-stack dashboard - ใช้
