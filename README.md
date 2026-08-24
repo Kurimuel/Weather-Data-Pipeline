@@ -135,6 +135,3 @@ DAX measures ที่ใช้: `Avg Temperature`, `Avg Temperature (All Locati
 `Reading Count`
 
 ## Roadmap ถัดไป
-
-1. ทดสอบ failure scenarios (ตัด internet, ใส่พิกัดผิด) แล้วบันทึกผลใน DECISIONS.md
-2. สร้าง View สำหรับแสดงเวลาไทย (Asia/Bangkok) ให้คนอื่นใช้ query ง่ายขึ้น โดยไม่กระทบข้อมูลจริงที่ยังเก็บเป็น UTC ตามมาตรฐาน
