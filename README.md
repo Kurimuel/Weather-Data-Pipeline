@@ -124,7 +124,7 @@ Query ตัวอย่างสำหรับ BigQuery dialect ดูได�
 report แยกต่างหาก เพื่อแสดงทักษะ BI tools + DAX โดยเฉพาะ เชื่อมต่อตรงกับ
 Supabase (PostgreSQL) ผ่าน Import mode
 
-![Power BI Dashboard](./screenshots/powerbi_dashboard.png)
+![Power BI Dashboard](./images/powerbi_dashboard.png)
 
 **หมายเหตุ:** ไม่มีลิงก์ live เพราะฟีเจอร์ "Publish to web" ของ Power BI
 ต้องใช้ Microsoft work/school account (organizational email) ซึ่งไม่มีใน
