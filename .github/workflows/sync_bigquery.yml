@@ -5,7 +5,7 @@ name: Sync to BigQuery
 # เท่า OLTP database) + กดรันเองได้ตอนทดสอบ
 on:
   schedule:
-    - cron: "17 2 * * *"  # 02:17 UTC ทุกวัน (นาทีสุ่ม เลี่ยง peak load เหมือน workflow อื่น)
+    # - cron: "17 2 * * *"  # 02:17 UTC ทุกวัน (นาทีสุ่ม เลี่ยง peak load เหมือน workflow อื่น)
   workflow_dispatch:
 
 jobs:
