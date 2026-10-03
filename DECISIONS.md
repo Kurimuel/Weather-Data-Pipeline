@@ -68,7 +68,7 @@
 
 ---
 
-## 6. แก้ TIMESTAMP เป็น TIMESTAMPTZ (แก้ไขภายหลัง)
+## 6. แก้ TIMESTAMP เป็น TIMESTAMPTZ 
 
 ตัดสินใจ: เปลี่ยน reading_time และ fetched_at จาก TIMESTAMP เป็น TIMESTAMPTZ
 
