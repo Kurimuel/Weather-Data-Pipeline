@@ -180,7 +180,7 @@ Deploy ฟรีผ่าน Streamlit Community Cloud เชื่อม GitHub
 ข้อมูลอัปเดตทุก 1 ชั่วโมง (ตาม automation) การ query ทุกครั้งที่มีคนเปิด dashboard จึงไม่จำเป็น เพิ่มภาระ database โดยไม่ได้ข้อมูลใหม่กว่าเดิม
 ป้องกันปัญหาถ้ามีคนเข้าดู dashboard พร้อมกันหลายคน ไม่ต้องยิง query ซ้ำๆ ทุกคน
 
-สิ่งที่ต้องทำเพิ่มตอน deploy จริง (ยังไม่ได้ทำ): Streamlit Community Cloud ไม่อ่านไฟล์ .env เหมือนตอนรันบนเครื่อง ต้องตั้งค่า SUPABASE_DB_URL ผ่าน Streamlit Secrets Manager แทน (เมนู Settings ของ app หลัง deploy)
+สิ่งที่ต้องทำเพิ่มตอน deploy จริง : Streamlit Community Cloud ไม่อ่านไฟล์ .env เหมือนตอนรันบนเครื่อง ต้องตั้งค่า SUPABASE_DB_URL ผ่าน Streamlit Secrets Manager แทน (เมนู Settings ของ app หลัง deploy)
 
 ---
 
