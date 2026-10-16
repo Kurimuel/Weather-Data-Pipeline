@@ -1,9 +1,0 @@
-requests==2.31.0
-psycopg[binary]
-python-dotenv==1.0.1
-streamlit
-pandas
-google-cloud-bigquery
-db-dtypes
-sentence-transformers
-pgvector
