@@ -67,6 +67,13 @@ def validate_weather_record(record: dict) -> list[ValidationError]:
                 "wind_speed_kmh", wind,
                 f"ค่าสูงผิดปกติ (เกิน {VALID_WIND_SPEED_RANGE[1]} km/h)"
             ))
+        elif not (VALID_WIND_SPEED_RANGE[0] <= wind <= VALID_WIND_SPEED_RANGE[1]):
+            # มาถึงตรงนี้ได้เฉพาะ NaN: เทียบ < หรือ > กับ NaN ได้ False เสมอ จึงหลุดสองเงื่อนไขข้างบน
+            # (อุณหภูมิและความชื้นไม่มีปัญหานี้ เพราะตรวจด้วย not (ต่ำ <= x <= สูง) อยู่แล้ว)
+            errors.append(ValidationError(
+                "wind_speed_kmh", wind,
+                "ค่าไม่ใช่ตัวเลขที่ใช้ได้ (เช่น NaN)"
+            ))
 
     reading_time = record.get("reading_time")
     if reading_time is not None:
