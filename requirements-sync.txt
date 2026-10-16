@@ -1,0 +1,10 @@
+# ไลบรารีของ workflow sync เข้า BigQuery (sync_bigquery.yml / bigquery_sync.py)
+# ไม่มี sentence-transformers, streamlit, pgvector
+#
+# db-dtypes ไม่ได้ถูก import ตรงๆ แต่ BigQuery ต้องใช้ตอนโหลด DataFrame (และดึง pyarrow มาด้วย)
+# เวอร์ชันของ pandas / google-cloud-bigquery / db-dtypes ยังไม่ pin เหมือน requirements.txt เดิม
+psycopg[binary]>=3.1,<4
+pandas
+google-cloud-bigquery
+db-dtypes
+python-dotenv==1.0.1

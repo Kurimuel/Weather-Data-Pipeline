@@ -1,0 +1,4 @@
+# ไลบรารีสำหรับรันเทสต์ (pytest) = ของ pipeline ดึงข้อมูล + pytest
+# ไม่ต้องลง sentence-transformers / streamlit เพื่อรันเทสต์
+-r requirements-pipeline.txt
+pytest>=8

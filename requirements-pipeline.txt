@@ -1,0 +1,8 @@
+# ไลบรารีของ workflow ดึงข้อมูลรายชั่วโมง (fetch_weather.yml / fetch_weather.py)
+# ตั้งใจให้เล็กที่สุด เพราะรันบ่อย: ไม่มี sentence-transformers (ซึ่งลาก PyTorch มาด้วย), streamlit, pandas
+#
+# เวอร์ชันของ requests และ python-dotenv คงตามที่ requirements.txt เดิม pin ไว้
+# psycopg ใส่ขอบเขต >=3.1,<4 เพราะโค้ดใช้ API ของ psycopg 3 (conn.transaction(), prepare_threshold)
+requests==2.31.0
+psycopg[binary]>=3.1,<4
+python-dotenv==1.0.1
