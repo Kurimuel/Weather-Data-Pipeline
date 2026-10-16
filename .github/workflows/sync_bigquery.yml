@@ -4,8 +4,10 @@ name: Sync to BigQuery
 # BigQuery เหมาะกับการวิเคราะห์ข้อมูลก้อนใหญ่เป็นรอบ ไม่ต้อง real-time
 # เท่า OLTP database) + กดรันเองได้ตอนทดสอบ
 on:
-  schedule:
-    # - cron: "17 2 * * *"  # 02:17 UTC ทุกวัน (นาทีสุ่ม เลี่ยง peak load เหมือน workflow อื่น)
+  # --- หยุดรันอัตโนมัติชั่วคราว: เอา # หน้า 2 บรรทัดนี้ออกเพื่อเปิดใช้งานอีกครั้ง ---
+  # (ต้องคอมเมนต์ทั้งบล็อก schedule: ไม่ใช่เฉพาะบรรทัด cron มิฉะนั้น YAML จะไม่ถูกต้อง)
+  # schedule:
+  #   - cron: "17 2 * * *"  # 02:17 UTC ทุกวัน (นาทีสุ่ม เลี่ยง peak load เหมือน workflow อื่น)
   workflow_dispatch:
 
 jobs:
@@ -20,9 +22,11 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+          cache: pip                          # เก็บ cache ของ pip ไว้ให้รอบถัดไปติดตั้งเร็วขึ้น
+          cache-dependency-path: requirements-sync.txt
 
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: pip install -r requirements-sync.txt
 
       - name: Write GCP service account key
         run: echo '${{ secrets.GCP_SERVICE_ACCOUNT_KEY }}' > gcp-service-account-key.json

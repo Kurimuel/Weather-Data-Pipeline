@@ -2,8 +2,10 @@ name: Fetch Weather Data
 
 # รันอัตโนมัติทุก 1 ชั่วโมง + สามารถกดรันเองได้จากหน้า GitHub (workflow_dispatch)
 on:
-  schedule:
-    # - cron: "23 * * * *"  # นาทีที่ 23 ของทุกชั่วโมง (เวลา UTC)
+  # --- หยุดรันอัตโนมัติชั่วคราว: เอา # หน้า 2 บรรทัดนี้ออกเพื่อเปิดใช้งานอีกครั้ง ---
+  # (ต้องคอมเมนต์ทั้งบล็อก schedule: ไม่ใช่เฉพาะบรรทัด cron มิฉะนั้น YAML จะไม่ถูกต้อง)
+  # schedule:
+  #   - cron: "23 * * * *"  # นาทีที่ 23 ของทุกชั่วโมง (เวลา UTC)
   workflow_dispatch:       # ปุ่ม "Run workflow" กดรันเองได้ตอนทดสอบ
 
 jobs:
@@ -18,9 +20,11 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+          cache: pip                          # เก็บ cache ของ pip ไว้ให้รอบถัดไปติดตั้งเร็วขึ้น
+          cache-dependency-path: requirements-pipeline.txt
 
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: pip install -r requirements-pipeline.txt
 
       - name: Run pipeline
         env:
