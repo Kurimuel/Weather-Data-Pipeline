@@ -10,6 +10,12 @@ on:
   #   - cron: "17 2 * * *"  # 02:17 UTC ทุกวัน (นาทีสุ่ม เลี่ยง peak load เหมือน workflow อื่น)
   workflow_dispatch:
 
+# กันรันซ้อนกัน: ถ้ารอบก่อนยังไม่จบ รอบใหม่จะรอคิว (ไม่ยกเลิกรอบที่กำลังทำงานอยู่)
+# สำคัญต่อ BQ_WRITE_STRATEGY=anti_join ซึ่งไม่ atomic เท่า MERGE ถ้ารันซ้อนกันอาจเกิดข้อมูลซ้ำ
+concurrency:
+  group: bigquery-sync
+  cancel-in-progress: false
+
 jobs:
   sync-bigquery:
     runs-on: ubuntu-latest
@@ -38,6 +44,11 @@ jobs:
           BQ_PROJECT_ID: ${{ secrets.BQ_PROJECT_ID }}
           BQ_DATASET: weather_pipeline
           BQ_TABLE: weather_readings
+          # ตั้งได้ที่ Settings > Secrets and variables > Actions > Variables (ไม่ตั้ง = ใช้ค่าเริ่มต้นของโค้ด)
+          #   BQ_WRITE_STRATEGY: merge (ค่าเริ่มต้น, ต้องเปิด billing) หรือ anti_join (ใช้ได้ใน sandbox)
+          #   BQ_LOOKBACK_HOURS: ชั่วโมงที่ดึงย้อนหลังเผื่อ (ค่าเริ่มต้น 6)
+          BQ_WRITE_STRATEGY: ${{ vars.BQ_WRITE_STRATEGY }}
+          BQ_LOOKBACK_HOURS: ${{ vars.BQ_LOOKBACK_HOURS }}
         run: python bigquery_sync.py
 
       - name: Clean up credentials file

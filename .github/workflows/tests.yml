@@ -46,6 +46,7 @@ jobs:
           cache-dependency-path: |
             requirements-dev.txt
             requirements-pipeline.txt
+            requirements-sync.txt
 
       - name: Install dependencies
         run: pip install -r requirements-dev.txt
