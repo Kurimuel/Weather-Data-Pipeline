@@ -294,6 +294,12 @@ def load_to_staging(df: pd.DataFrame, bq_client: bigquery.Client, staging_ref: s
     return staged
 
 
+def _count_rows(bq_client: bigquery.Client, table_ref: str) -> int:
+    """นับแถวทั้งหมดของตาราง (BigQuery ตอบ COUNT(*) ของทั้งตารางจาก metadata ไม่เสียค่าสแกน)"""
+    rows = list(bq_client.query(f"SELECT COUNT(*) AS n FROM `{table_ref}`").result())
+    return rows[0].n
+
+
 def merge_staging_into_target(
     bq_client: bigquery.Client, target_ref: str, staging_ref: str, strategy: str
 ) -> int | None:
@@ -311,8 +317,14 @@ def merge_staging_into_target(
             destination=target_ref,
             write_disposition=bigquery.WriteDisposition.WRITE_APPEND,
         )
-        job = bq_client.query(build_anti_join_sql(target_ref, staging_ref), job_config=job_config)
-        return job.result().total_rows
+        # หาจำนวนที่เติมจริงด้วยการนับแถวของตารางจริง "ก่อนและหลัง" ห้ามใช้ job.result().total_rows
+        # เพราะเมื่อ query เขียนลงตารางปลายทาง ค่านั้นคือจำนวนแถว "ทั้งตาราง" ไม่ใช่จำนวนที่เพิ่งเติม
+        # (เจอจริงบน BigQuery: รายงาน 4020 ทั้งที่ดึงมาแค่ 10 แถว) วิธีนี้ถูกต้องเพราะ workflow ตั้ง
+        # concurrency ให้ sync รันทีละรอบ จึงไม่มีใครเขียนตารางนี้ระหว่างที่นับ
+        before = _count_rows(bq_client, target_ref)
+        bq_client.query(build_anti_join_sql(target_ref, staging_ref), job_config=job_config).result()
+        after = _count_rows(bq_client, target_ref)
+        return after - before if after >= before else None
 
     except Forbidden as e:
         text = str(e).lower()
@@ -400,6 +412,9 @@ def main() -> int:
     if inserted is None:
         print(f"Sync สำเร็จ: ส่งเข้า staging {stats['fetched']} record "
               f"(BigQuery ไม่รายงานจำนวนที่เติมเข้าตารางจริง)")
+    elif inserted > stats["fetched"]:
+        print(f"[WARNING] นับจำนวนที่เติมได้ {inserted} แต่ดึงมาเพียง {stats['fetched']} record ซึ่งเป็นไปไม่ได้ "
+              f"(อาจมีการเขียนตารางนี้พร้อมกัน) กรุณาตรวจตารางด้วยมือ")
     else:
         skipped = stats["fetched"] - inserted
         print(f"Sync สำเร็จ: เติมใหม่ {inserted} record, ข้ามเพราะมีอยู่แล้ว {skipped} record "
