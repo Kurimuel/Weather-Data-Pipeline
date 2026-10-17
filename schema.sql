@@ -26,12 +26,14 @@ CREATE TABLE IF NOT EXISTS locations (
 -- ============================================================
 CREATE TABLE IF NOT EXISTS weather_readings (
     id SERIAL PRIMARY KEY,
-    location_id INTEGER NOT NULL REFERENCES locations(id),
+    location_id INTEGER NOT NULL,
     reading_time TIMESTAMPTZ NOT NULL,       -- เวลาที่ "ข้อมูล" นี้เป็นของช่วงเวลานั้น (จาก API)
     temperature_c DECIMAL(4,1),
     humidity_percent INTEGER,
     wind_speed_kmh DECIMAL(4,1),
     fetched_at TIMESTAMPTZ DEFAULT NOW(),    -- เวลาที่ pipeline ไปดึงข้อมูลมาจริง
+    CONSTRAINT fk_weather_location
+        FOREIGN KEY (location_id) REFERENCES locations(id),
     CONSTRAINT weather_readings_location_id_reading_time_key
         UNIQUE (location_id, reading_time)   -- กันข้อมูลซ้ำ ถ้ารัน pipeline ซ้ำในรอบเดียวกัน
 );
