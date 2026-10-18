@@ -1,18 +1,21 @@
 name: Diagnose Open-Meteo API (temporary)
 
 # workflow วินิจฉัยชั่วคราว กดรันเองเท่านั้น (ไม่มี schedule)
-# ยิง Open-Meteo จากบน runner ของ GitHub เพื่อหาสาเหตุที่บางเมือง Timeout ตอน fetch
+# ยิง Open-Meteo จากบน runner ของ GitHub เพื่อหาสาเหตุที่บางคำขอ Timeout ตอน fetch
 # ไม่ใช้ secret ไม่เขียน Supabase/BigQuery ลบทิ้งได้เมื่อหาสาเหตุเจอแล้ว
-# แนะนำให้รันหลายครั้งในเวลาต่างกัน (เช้า/บ่าย/ค่ำ) เพราะปัญหาอาจขึ้นกับช่วงเวลา
+#
+# เวอร์ชัน 2 ทดสอบในรอบเดียว: ช่วงพักหลายค่า, ที่อยู่ IP ที่ใช้, และเวลาที่คำขอที่ล้มฟื้นตัว
+# ใช้เวลาประมาณ 15 ถึง 35 นาที (ขึ้นกับจำนวนคำขอที่ล้ม) ซึ่งนับเป็นโควตา Actions ถ้า repo เป็น private
+# ถ้าอยากให้สั้นลง ให้ลดตารางช่วงพัก เช่น "5,120" (3 รอบ)
 on:
   workflow_dispatch:
     inputs:
-      rounds:
-        description: "จำนวนรอบ (แต่ละรอบยิงครบ 12 เมือง)"
-        default: "3"
-      pause_seconds:
-        description: "เว้นระหว่างรอบ (วินาที)"
-        default: "30"
+      pause_schedule:
+        description: "ช่วงพักก่อนรอบที่ 2, 3, ... (วินาที คั่นด้วยจุลภาค) เช่น 5,120,5,120,30,30 = 7 รอบ"
+        default: "5,120,5,120,30,30"
+      max_recovery_probes:
+        description: "จำนวนคำขอที่ล้มซึ่งจะวัดการฟื้นตัวเต็มรูปแบบ (แต่ละครั้งใช้เวลาได้ถึง ~100 วินาที)"
+        default: "6"
 
 permissions:
   contents: read
@@ -20,8 +23,8 @@ permissions:
 jobs:
   diagnose:
     runs-on: ubuntu-latest
-    # กรณีแย่สุด (ล้มทุกคำขอ) ใช้เวลาราว 20 นาทีสำหรับ 3 รอบ จึงตั้งเพดานไว้ 30 นาที
-    timeout-minutes: 30
+    # กรณีแย่สุด (ล้มเกือบทุกคำขอ) อาจใช้เกิน 30 นาที จึงตั้งเพดานไว้ 60 นาที
+    timeout-minutes: 60
 
     steps:
       - name: Checkout repository
@@ -40,6 +43,6 @@ jobs:
 
       - name: Run diagnostics
         env:
-          ROUNDS: ${{ inputs.rounds }}
-          PAUSE_SECONDS: ${{ inputs.pause_seconds }}
+          PAUSE_SCHEDULE: ${{ inputs.pause_schedule }}
+          MAX_RECOVERY_PROBES: ${{ inputs.max_recovery_probes }}
         run: python diagnose_api.py
