@@ -1,0 +1,45 @@
+name: Diagnose Open-Meteo API (temporary)
+
+# workflow วินิจฉัยชั่วคราว กดรันเองเท่านั้น (ไม่มี schedule)
+# ยิง Open-Meteo จากบน runner ของ GitHub เพื่อหาสาเหตุที่บางเมือง Timeout ตอน fetch
+# ไม่ใช้ secret ไม่เขียน Supabase/BigQuery ลบทิ้งได้เมื่อหาสาเหตุเจอแล้ว
+# แนะนำให้รันหลายครั้งในเวลาต่างกัน (เช้า/บ่าย/ค่ำ) เพราะปัญหาอาจขึ้นกับช่วงเวลา
+on:
+  workflow_dispatch:
+    inputs:
+      rounds:
+        description: "จำนวนรอบ (แต่ละรอบยิงครบ 12 เมือง)"
+        default: "3"
+      pause_seconds:
+        description: "เว้นระหว่างรอบ (วินาที)"
+        default: "30"
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    # กรณีแย่สุด (ล้มทุกคำขอ) ใช้เวลาราว 20 นาทีสำหรับ 3 รอบ จึงตั้งเพดานไว้ 30 นาที
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-pipeline.txt
+
+      # ใช้ไฟล์เดียวกับ workflow fetch เพื่อให้ requests/urllib3 เป็นเวอร์ชันเดียวกับของจริง
+      - name: Install dependencies
+        run: pip install -r requirements-pipeline.txt
+
+      - name: Run diagnostics
+        env:
+          ROUNDS: ${{ inputs.rounds }}
+          PAUSE_SECONDS: ${{ inputs.pause_seconds }}
+        run: python diagnose_api.py
