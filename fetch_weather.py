@@ -6,6 +6,12 @@ fetch_weather.py
 วิธีรัน:
     python3 fetch_weather.py
 
+โหมดดึงข้อมูล (ตั้งผ่าน environment variable FETCH_MODE):
+    batch     (ค่าเริ่มต้น) ยิง API "ครั้งเดียว" ขอข้อมูลทุกเมืองพร้อมกัน แล้วจับคู่ผลกับเมืองตามลำดับ
+              ตรวจพิกัดที่ API ตอบกลับทุกเมืองว่าตรงกับที่ขอ (กันลำดับสลับ) ถ้าล้มจะรอแล้วลองใหม่หลายครั้ง
+              เหตุผลที่เปลี่ยน: บน GitHub runner คำขอเดี่ยว 12 ครั้งต่อรอบล้ม ~29% (ดู DECISIONS.md ข้อ 22)
+    per_city  พฤติกรรมเดิม ยิงทีละเมือง (ใช้ย้อนกลับถ้าโหมดรวมมีปัญหา ไม่ต้องแก้โค้ด)
+
 Exit code (สำคัญสำหรับ GitHub Actions เพราะใช้ตัดสินว่า job เป็นสีเขียวหรือแดง):
     0 = รอบนี้ใช้ได้ (บันทึกสำเร็จอย่างน้อย 1 เมือง และล้มเหลวไม่เกิน MAX_FAILURE_RATIO)
     1 = รอบนี้ล้มเหลว (ตั้งค่าไม่ครบ / ต่อ database ไม่ได้ / ไม่มีข้อมูลถูกบันทึกเลย /
@@ -57,6 +63,17 @@ BACKOFF_BASE_SECONDS = 2       # รอ 2 วินาที, 4 วินาท�
 MAX_RETRY_AFTER_SECONDS = 30   # เพดานเวลารอ เมื่อ API ส่ง header Retry-After มา
 RETRYABLE_STATUS_CODES = {429, 500, 502, 503, 504}  # ปัญหาชั่วคราวฝั่ง API ที่ควรลองใหม่
 MAX_FAILURE_RATIO = 0.5        # ล้มเหลวเกินสัดส่วนนี้ของจำนวนเมือง -> job ต้องขึ้นสีแดง
+
+# --------------------------------------------------------------------------
+# ตั้งค่าโหมดรวม (batch): ยิงครั้งเดียวสำหรับทุกเมือง
+# ค่าตัวเลขมาจากการวัดบน GitHub runner (ดู DECISIONS.md ข้อ 22) ปรับได้ตรงนี้
+# --------------------------------------------------------------------------
+DEFAULT_FETCH_MODE = "batch"
+FETCH_MODES = ("batch", "per_city")
+BATCH_TIMEOUT = 8                     # วินาทีต่อครั้ง (คำขอที่สำเร็จใช้ไม่ถึง 1.3 วินาทีในทุกการวัด)
+BATCH_RETRY_WAITS = (10, 30, 60)      # รอกี่วินาทีก่อนลองครั้งที่ 2, 3, 4 (รวมลองได้ 4 ครั้ง)
+BATCH_MAX_RETRY_AFTER_SECONDS = 120   # เพดานเวลารอเมื่อ API ส่ง Retry-After มา
+COORDINATE_TOLERANCE_DEGREES = 1.0    # พิกัดที่ API ตอบต้องห่างจากที่ขอไม่เกินนี้ (ดูเหตุผลที่ verify_batch_item)
 
 
 def _backoff_seconds(attempt: int, response=None) -> float:
@@ -135,6 +152,161 @@ def fetch_weather_for_location(location: dict, max_retries: int = MAX_RETRIES) -
             return None
 
     return None
+
+
+def get_fetch_mode() -> str:
+    """อ่านโหมดดึงข้อมูลจาก FETCH_MODE (ว่าง = batch)"""
+    raw = os.getenv("FETCH_MODE", "").strip().lower()
+    if not raw:
+        return DEFAULT_FETCH_MODE
+    if raw not in FETCH_MODES:
+        raise ValueError(f"FETCH_MODE ต้องเป็นหนึ่งใน {', '.join(FETCH_MODES)} แต่ได้ {raw!r}")
+    return raw
+
+
+def _batch_params(locations: list) -> dict:
+    """พารามิเตอร์ของคำขอรวม: latitude/longitude เป็นรายการคั่นด้วยจุลภาค เรียงตามลำดับของ locations"""
+    return {
+        "latitude": ",".join(str(loc["lat"]) for loc in locations),
+        "longitude": ",".join(str(loc["lon"]) for loc in locations),
+        "current": "temperature_2m,relative_humidity_2m,wind_speed_10m",
+        "timezone": "UTC",
+    }
+
+
+def _batch_wait(attempt: int, response, waits=BATCH_RETRY_WAITS) -> float:
+    """เวลารอก่อนลองครั้งถัดไป ถ้า API ส่ง Retry-After (ตัวเลข) มาจะเชื่อค่านั้น แต่ไม่เกินเพดาน"""
+    if response is not None:  # ห้ามเขียน `if response:` เพราะ Response ที่เป็น error มีค่าความจริงเป็น False
+        retry_after = response.headers.get("Retry-After")
+        if retry_after and retry_after.isdigit():
+            return min(int(retry_after), BATCH_MAX_RETRY_AFTER_SECONDS)
+    return waits[attempt - 1]
+
+
+def _normalize_batch(data, expected: int):
+    """
+    ตรวจรูปร่างของผลลัพธ์คำขอรวม คืน (รายการผลต่อเมือง, None) ถ้าถูกต้อง หรือ (None, ข้อความปัญหา)
+
+    ผลลัพธ์ที่ถูกต้องคือรายการ (list) ที่มีจำนวนเท่ากับจำนวนเมืองที่ขอ เรียงตามลำดับที่ขอ
+    (ถ้าขอเมืองเดียว API ตอบเป็น object ตัวเดียว ไม่ใช่ list จึงรองรับกรณีนั้นด้วย)
+    """
+    if isinstance(data, dict) and expected == 1:
+        data = [data]
+    if not isinstance(data, list):
+        detail = ""
+        if isinstance(data, dict) and data.get("reason"):
+            detail = f": {str(data['reason'])[:150]}"
+        return None, f"ผลลัพธ์ไม่ใช่รายการของเมืองต่างๆ (ได้ {type(data).__name__}{detail})"
+    if len(data) != expected:
+        return None, f"ได้ข้อมูล {len(data)} เมือง แต่ขอ {expected} เมือง"
+    return data, None
+
+
+def fetch_weather_batch(locations: list, timeout: float = BATCH_TIMEOUT, waits=BATCH_RETRY_WAITS) -> list | None:
+    """
+    ยิง Open-Meteo "ครั้งเดียว" ขอข้อมูลทุกเมืองพร้อมกัน คืนรายการผลต่อเมืองเรียงตามลำดับของ locations
+    หรือ None ถ้าล้มเหลวครบทุกครั้งที่ลอง
+
+    ลองใหม่ได้ len(waits)+1 ครั้ง โดยรอตาม waits (10, 30, 60 วินาที) ระหว่างครั้ง เพราะจากการวัดบน
+    GitHub runner ความล้มเหลวเป็นช่วงๆ ที่หายเองใน 10 ถึง ~70 วินาที การลองซ้ำทันทีภายในไม่กี่วินาทีไม่ช่วย
+    ลองใหม่เมื่อ: Timeout / เชื่อมต่อไม่ได้ / HTTP 429 และ 5xx / อ่าน JSON ไม่ได้ / ผลลัพธ์รูปร่างผิด
+    ไม่ลองใหม่เมื่อ: HTTP 4xx อื่นๆ (ลองกี่ครั้งผลก็เหมือนเดิม)
+    ทุกครั้งที่ล้มจะพิมพ์ชนิดของความผิดพลาด (เช่น ReadTimeout) และเวลาที่ใช้ เพื่อใช้วินิจฉัย
+    """
+    params = _batch_params(locations)
+    expected = len(locations)
+    max_attempts = len(waits) + 1
+
+    for attempt in range(1, max_attempts + 1):
+        start = time.monotonic()
+        reason = None
+        retry_response = None
+        try:
+            response = requests.get(API_BASE_URL, params=params, timeout=timeout)
+            response.raise_for_status()
+            items, problem = _normalize_batch(response.json(), expected)
+            if problem is None:
+                print(f"ได้ข้อมูลของ {expected} เมืองจากคำขอเดียวใน {time.monotonic() - start:.1f} วินาที "
+                      f"(ครั้งที่ {attempt}/{max_attempts})")
+                return items
+            reason = problem
+
+        except requests.exceptions.HTTPError as e:
+            status = e.response.status_code if e.response is not None else None
+            if status not in RETRYABLE_STATUS_CODES:
+                print(f"[ERROR] API ตอบ HTTP {status} สำหรับคำขอรวม (ไม่ลองใหม่ เพราะไม่ใช่ปัญหาชั่วคราว): {e}")
+                return None
+            reason = f"HTTP {status}"
+            retry_response = e.response
+
+        except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
+            reason = type(e).__name__   # เช่น ReadTimeout, ConnectTimeout, ConnectionError
+
+        except ValueError:
+            reason = "แปลง response เป็น JSON ไม่ได้"
+
+        except requests.exceptions.RequestException as e:
+            print(f"[ERROR] คำขอรวมล้มเหลวโดยไม่ลองใหม่ ({type(e).__name__}): {e}")
+            return None
+
+        elapsed = time.monotonic() - start
+        if attempt < max_attempts:
+            wait = _batch_wait(attempt, retry_response, waits)
+            print(f"[WARNING] คำขอรวม {expected} เมืองล้มเหลว (ครั้งที่ {attempt}/{max_attempts}): "
+                  f"{reason} หลัง {elapsed:.1f} วินาที รอ {wait} วินาทีแล้วลองใหม่...")
+            time.sleep(wait)
+        else:
+            print(f"[ERROR] คำขอรวม {expected} เมืองล้มเหลวครบ {max_attempts} ครั้ง "
+                  f"(ครั้งสุดท้าย: {reason} หลัง {elapsed:.1f} วินาที)")
+    return None
+
+
+def _degrees_apart(a: float, b: float) -> float:
+    """ระยะห่างของมุมสองค่าเป็นองศา โดยคิดการวนรอบที่ ±180 (ใช้กับ longitude)"""
+    return abs((a - b + 180) % 360 - 180)
+
+
+def verify_batch_item(location: dict, item) -> str | None:
+    """
+    ตรวจว่าผลของรายการนี้เป็นของเมืองที่เราคิดจริง คืนข้อความปัญหา หรือ None ถ้าถูกต้อง
+
+    ทำไมต้องตรวจ: โหมดรวมจับคู่ผลกับเมืองด้วย "ลำดับในรายการ" เท่านั้น ถ้าลำดับสลับหรือเลื่อนไปหนึ่งตำแหน่ง
+    ข้อมูลของเมืองหนึ่งจะถูกบันทึกเป็นของอีกเมืองหนึ่งโดยไม่มี error ใดๆ ซึ่งอันตรายที่สุดของโหมดนี้
+    API ตอบพิกัดของจุดกริดที่ใกล้ที่สุด (ต่างจากที่ขอเล็กน้อย) จึงยอมให้คลาดเคลื่อนได้ตาม
+    COORDINATE_TOLERANCE_DEGREES ซึ่งตั้ง 1 องศา: ใหญ่พอสำหรับการปัดจุดกริด แต่เล็กกว่าระยะห่างระหว่างเมืองใดๆ
+    ในรายการ (คู่ที่ใกล้สุดคือ London กับ Paris ห่างกัน 2.65 องศาในแกนที่ห่างกว่า รองลงมาคือ Bangkok กับ Khon Kaen
+    2.69 องศา เพราะโค้ดปฏิเสธเมื่อแกนใดแกนหนึ่งเกินเกณฑ์) เทสต์ยืนยันว่าทุกคู่แยกกันได้
+    """
+    if not isinstance(item, dict):
+        return "ผลลัพธ์ของเมืองนี้ไม่ใช่ข้อมูลแบบ object"
+    lat, lon = item.get("latitude"), item.get("longitude")
+    if not isinstance(lat, (int, float)) or not isinstance(lon, (int, float)):
+        return "ผลลัพธ์ไม่มี latitude/longitude จึงตรวจลำดับของเมืองไม่ได้"
+    if (abs(lat - location["lat"]) > COORDINATE_TOLERANCE_DEGREES
+            or _degrees_apart(lon, location["lon"]) > COORDINATE_TOLERANCE_DEGREES):
+        return (f"พิกัดที่ API ตอบ ({lat}, {lon}) ห่างจากที่ขอ ({location['lat']}, {location['lon']}) "
+                f"เกิน {COORDINATE_TOLERANCE_DEGREES} องศา อาจเป็นลำดับสลับ จึงไม่ใช้ข้อมูลนี้")
+    return None
+
+
+def _github_annotation(level: str, message: str) -> None:
+    """
+    พิมพ์คำสั่งของ GitHub Actions (::warning:: หรือ ::error::) เพื่อให้ขึ้นบนหน้าสรุปของ run
+    ทำเฉพาะเมื่อรันบน GitHub (GITHUB_ACTIONS=true) นอกนั้นไม่พิมพ์เพื่อไม่ให้รก
+    """
+    if os.getenv("GITHUB_ACTIONS") != "true":
+        return
+    message = message.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+    print(f"::{level} title=Fetch Weather::{message}")
+
+
+def _write_step_summary(lines: list) -> None:
+    """เขียนสรุปลงหน้า Summary ของ run บน GitHub (ถ้ามี GITHUB_STEP_SUMMARY)"""
+    path = os.getenv("GITHUB_STEP_SUMMARY")
+    if not path:
+        return
+    with open(path, "a", encoding="utf-8") as f:
+        f.write("\n".join(lines) + "\n")
 
 
 def parse_weather_data(raw_data: dict, location: dict) -> dict | None:
@@ -285,51 +457,85 @@ def main() -> int:
       saved    = บันทึกสำเร็จ
       rejected = ข้อมูลไม่ผ่าน validation (ระบบทำงานถูกต้อง แค่ไม่ยอมเก็บข้อมูลแปลกๆ
                  จึงไม่นับเป็นความล้มเหลวของ pipeline)
-      failed   = ดึงไม่ได้ / แปลงข้อมูลไม่ได้ / บันทึกลง database ไม่ได้
+      failed   = ดึงไม่ได้ / พิกัดไม่ตรง / แปลงข้อมูลไม่ได้ / บันทึกลง database ไม่ได้
 
     ตัดสินว่ารอบนี้ล้มเหลว (exit 1) เมื่อ:
       - ไม่มีข้อมูลถูกบันทึกเลย (saved == 0) หรือ
       - failed เกิน MAX_FAILURE_RATIO ของจำนวนเมืองทั้งหมด
-    ปล่อยให้เมืองเดียว timeout เป็นเรื่องปกติ (ไม่ทำให้ job แดง) เพราะ timeout
-    ส่วนใหญ่เป็นปัญหาเครือข่ายแบบสุ่ม แต่ถ้าล้มเยอะจนผิดปกติต้องรู้ทันที
+    ในโหมด batch ถ้าคำขอรวมล้มเหลวครบทุกครั้งที่ลอง ทุกเมืองถือว่าล้มเหลว จึง exit 1 ทันที (ชั่วโมงนั้นไม่มีข้อมูลเลย)
+    ส่วนในโหมด per_city เมืองเดียว timeout ถือเป็นเรื่องปกติ (ไม่ทำให้ job แดง)
+    ทุกกรณีที่มีเมืองล้มเหลวหรือไม่ผ่าน validation จะพิมพ์ชื่อเมือง และขึ้น ::warning:: บน GitHub
     """
     db_url = os.getenv("SUPABASE_DB_URL")
     if not db_url:
         print("[ERROR] ไม่พบ SUPABASE_DB_URL ในไฟล์ .env กรุณาตั้งค่าก่อนรัน")
         return 1
+    try:
+        mode = get_fetch_mode()
+    except ValueError as e:
+        print(f"[ERROR] {e}")
+        return 1
 
-    print(f"=== เริ่มดึงข้อมูล ({datetime.now().isoformat()}) ===")
+    print(f"=== เริ่มดึงข้อมูล ({datetime.now().isoformat()}) | โหมด: {mode} ===")
 
-    # เช็ค database ก่อนเริ่ม: ถ้าต่อไม่ได้ ไม่มีประโยชน์ที่จะยิง API 12 ครั้งไปทิ้งเปล่าๆ
+    # เช็ค database ก่อนเริ่ม: ถ้าต่อไม่ได้ ไม่มีประโยชน์ที่จะยิง API ไปทิ้งเปล่าๆ
     conn = open_connection(db_url)
     if conn is None:
         print("[FAILED] ต่อ database ไม่ได้ ยกเลิกรอบนี้")
+        _github_annotation("error", "ต่อ database ไม่ได้ ยกเลิกรอบนี้")
         return 1
 
+    total = len(LOCATIONS)
     saved = 0
     rejected = 0
     failed = 0
+    failed_names = []
+    rejected_names = []
 
     try:
-        for location in LOCATIONS:
-            print(f"\nกำลังดึงข้อมูลของ {location['name']}...")
+        batch_items = None
+        if mode == "batch":
+            print(f"\nกำลังดึงข้อมูลของ {total} เมืองด้วยคำขอเดียว...")
+            batch_items = fetch_weather_batch(LOCATIONS)
+            if batch_items is None:
+                # คำขอรวมล้มเหลวครบทุกครั้ง: ไม่มีข้อมูลของเมืองใดเลย ไม่ต้องวนต่อ
+                failed = total
+                failed_names = [loc["name"] for loc in LOCATIONS]
 
-            raw_data = fetch_weather_for_location(location)
+        for index, location in enumerate(LOCATIONS):
+            if mode == "batch" and batch_items is None:
+                break
+            name = location["name"]
+            print(f"\nกำลังดึงข้อมูลของ {name}..." if mode == "per_city"
+                  else f"\nกำลังประมวลผลข้อมูลของ {name}...")
+
+            if mode == "batch":
+                raw_data = batch_items[index]
+                problem = verify_batch_item(location, raw_data)
+                if problem:
+                    print(f"[ERROR] {name}: {problem}")
+                    raw_data = None
+            else:
+                raw_data = fetch_weather_for_location(location)
+
             if raw_data is None:
                 failed += 1
+                failed_names.append(name)
                 continue  # ข้ามไปเมืองถัดไป ไม่ทำให้ทั้ง pipeline ล้ม
 
             weather_record = parse_weather_data(raw_data, location)
             if weather_record is None:
                 failed += 1
+                failed_names.append(name)
                 continue
 
             validation_errors = validate_weather_record(weather_record)
             if validation_errors:
-                print(f"  [VALIDATION FAILED] ข้อมูลของ {location['name']} ไม่ผ่านการตรวจสอบ:")
+                print(f"  [VALIDATION FAILED] ข้อมูลของ {name} ไม่ผ่านการตรวจสอบ:")
                 for err in validation_errors:
                     print(f"    - {err}")
                 rejected += 1
+                rejected_names.append(name)
                 continue  # ไม่เก็บข้อมูลที่ไม่ผ่าน validation ลง database
 
             # ถ้า connection หลุดระหว่างรอบ ลองเปิดใหม่ 1 ครั้งก่อนบันทึก
@@ -337,6 +543,7 @@ def main() -> int:
                 conn = open_connection(db_url)
             if conn is None:
                 failed += 1
+                failed_names.append(name)
                 continue
 
             success = save_to_database(weather_record, conn)
@@ -352,24 +559,46 @@ def main() -> int:
                       f"ความชื้น {weather_record['humidity_percent']}%")
             else:
                 failed += 1
-                print(f"  บันทึกไม่สำเร็จสำหรับ {location['name']}")
+                failed_names.append(name)
+                print(f"  บันทึกไม่สำเร็จสำหรับ {name}")
 
-            time.sleep(1)  # หน่วงเวลาก่อนไปเมืองถัดไป ลดโอกาสโดน rate limit/timeout
-            # จากการยิง request รัวติดกันเร็วเกินไป (ดู DECISIONS.md ข้อ 17)
+            if mode == "per_city":
+                time.sleep(1)  # หน่วงเวลาก่อนไปเมืองถัดไป ลดโอกาสโดน rate limit/timeout
+                # จากการยิง request รัวติดกันเร็วเกินไป (ดู DECISIONS.md ข้อ 17)
     finally:
         if conn is not None and not conn.closed:
             conn.close()
 
-    total = len(LOCATIONS)
     print(f"\n=== เสร็จสิ้น ({datetime.now().isoformat()}) ===")
     print(f"สรุป: บันทึกสำเร็จ {saved}/{total} | ไม่ผ่าน validation {rejected} | ล้มเหลว {failed}")
+    if failed_names:
+        print("เมืองที่ล้มเหลว: " + ", ".join(failed_names))
+    if rejected_names:
+        print("เมืองที่ไม่ผ่าน validation: " + ", ".join(rejected_names))
+
+    summary_lines = [f"### Fetch Weather Data (โหมด {mode})", f"- บันทึกสำเร็จ: {saved}/{total}"]
+    if failed_names:
+        summary_lines.append(f"- เมืองที่ล้มเหลว ({failed}): {', '.join(failed_names)}")
+    if rejected_names:
+        summary_lines.append(f"- ไม่ผ่าน validation ({rejected}): {', '.join(rejected_names)}")
+    _write_step_summary(summary_lines)
+
+    if failed_names or rejected_names:
+        detail = f"บันทึกสำเร็จ {saved}/{total}"
+        if failed_names:
+            detail += f" | ล้มเหลว: {', '.join(failed_names)}"
+        if rejected_names:
+            detail += f" | ไม่ผ่าน validation: {', '.join(rejected_names)}"
+        _github_annotation("warning", detail)
 
     if saved == 0:
         print("[FAILED] ไม่มีข้อมูลถูกบันทึกเลยในรอบนี้")
+        _github_annotation("error", "ไม่มีข้อมูลถูกบันทึกเลยในรอบนี้")
         return 1
     if failed > total * MAX_FAILURE_RATIO:
         print(f"[FAILED] ล้มเหลว {failed}/{total} เมือง เกินเกณฑ์ที่ยอมรับได้ "
               f"({MAX_FAILURE_RATIO:.0%})")
+        _github_annotation("error", f"ล้มเหลว {failed}/{total} เมือง เกินเกณฑ์ที่ยอมรับได้")
         return 1
     return 0
 
