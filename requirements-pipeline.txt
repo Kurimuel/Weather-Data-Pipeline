@@ -4,7 +4,7 @@
 # เวอร์ชันของ requests และ python-dotenv คงตามที่ requirements.txt เดิม pin ไว้
 # psycopg ใส่ขอบเขต >=3.1,<4 เพราะโค้ดใช้ API ของ psycopg 3 (conn.transaction(), prepare_threshold)
 requests==2.31.0
-psycopg[binary]>=3.1,<4
+psycopg[binary]
 python-dotenv==1.0.1
 streamlit
 pandas
