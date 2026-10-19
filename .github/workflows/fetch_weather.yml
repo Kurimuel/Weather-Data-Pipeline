@@ -11,6 +11,8 @@ on:
 jobs:
   fetch-weather:
     runs-on: ubuntu-latest
+    # กัน job ค้างกินโควตา: โหมดรวมแย่สุดใช้ ~2.5 นาที โหมดเมืองต่อเมืองแย่สุด ~10 นาที
+    timeout-minutes: 15
 
     steps:
       - name: Checkout repository
@@ -29,4 +31,8 @@ jobs:
       - name: Run pipeline
         env:
           SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          # ตั้งได้ที่ Settings > Secrets and variables > Actions > Variables (ไม่ตั้ง = batch)
+          #   FETCH_MODE=batch     ยิง API ครั้งเดียวทุกเมือง (ค่าเริ่มต้น)
+          #   FETCH_MODE=per_city  ย้อนกลับไปยิงทีละเมืองแบบเดิม
+          FETCH_MODE: ${{ vars.FETCH_MODE }}
         run: python fetch_weather.py
