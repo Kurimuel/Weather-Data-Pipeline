@@ -327,6 +327,9 @@ class Pipeline:
 def pipeline(monkeypatch):
     p = Pipeline()
     monkeypatch.setenv("SUPABASE_DB_URL", "postgresql://fake")
+    monkeypatch.setenv("FETCH_MODE", "per_city")   # fixture นี้จำลองการดึงทีละเมือง (โหมดเดิมที่ใช้ย้อนกลับได้)
+    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
+    monkeypatch.delenv("GITHUB_STEP_SUMMARY", raising=False)
     monkeypatch.setattr(fw.time, "sleep", lambda seconds: None)
 
     def fake_open(db_url):
@@ -483,3 +486,386 @@ def test_main_summary_line_reports_counts(pipeline, capsys):
     out = capsys.readouterr().out
     saved = len(NAMES) - 2
     assert f"บันทึกสำเร็จ {saved}/{len(NAMES)} | ไม่ผ่าน validation 1 | ล้มเหลว 1" in out
+
+
+# ===========================================================================
+# โหมดรวม (batch): ยิงครั้งเดียวสำหรับทุกเมือง
+# ===========================================================================
+
+import itertools
+
+
+def batch_payload(temps=None, offset=0.03):
+    """ผลลัพธ์ของคำขอรวม: รายการเรียงตามลำดับ LOCATIONS แต่ละเมืองมีอุณหภูมิไม่ซ้ำกัน (ไว้ตรวจการจับคู่)"""
+    temps = temps or [20.0 + i for i in range(len(fw.LOCATIONS))]
+    return [api_payload(time="2026-01-01T00:15", temp=t, lat=loc["lat"] + offset, lon=loc["lon"] + offset)
+            for loc, t in zip(fw.LOCATIONS, temps)]
+
+
+def test_get_fetch_mode_defaults_to_batch(monkeypatch):
+    monkeypatch.delenv("FETCH_MODE", raising=False)
+    assert fw.get_fetch_mode() == "batch"
+    monkeypatch.setenv("FETCH_MODE", "  ")
+    assert fw.get_fetch_mode() == "batch"
+
+
+@pytest.mark.parametrize("raw, expected", [("batch", "batch"), ("PER_CITY", "per_city"), (" per_city ", "per_city")])
+def test_get_fetch_mode_parsing(monkeypatch, raw, expected):
+    monkeypatch.setenv("FETCH_MODE", raw)
+    assert fw.get_fetch_mode() == expected
+
+
+def test_get_fetch_mode_rejects_unknown_value(monkeypatch):
+    monkeypatch.setenv("FETCH_MODE", "turbo")
+    with pytest.raises(ValueError, match="FETCH_MODE"):
+        fw.get_fetch_mode()
+
+
+# ---------- fetch_weather_batch ----------
+
+def test_batch_params_list_every_city_in_order(install_api, sleeps):
+    api = install_api(make_response(200, batch_payload()))
+    fw.fetch_weather_batch(fw.LOCATIONS)
+    params = api.calls[0]["params"]
+    assert params["latitude"] == ",".join(str(l["lat"]) for l in fw.LOCATIONS)
+    assert params["longitude"] == ",".join(str(l["lon"]) for l in fw.LOCATIONS)
+    assert params["timezone"] == "UTC"
+    for field in ("temperature_2m", "relative_humidity_2m", "wind_speed_10m"):
+        assert field in params["current"]
+
+
+def test_batch_success_uses_exactly_one_request(install_api, sleeps):
+    api = install_api(make_response(200, batch_payload()))
+    items = fw.fetch_weather_batch(fw.LOCATIONS)
+    assert len(api.calls) == 1
+    assert len(items) == len(fw.LOCATIONS)
+    assert api.calls[0]["timeout"] == fw.BATCH_TIMEOUT
+    assert sleeps == []
+
+
+def test_batch_timeout_is_short_and_worst_case_fits_the_job_limit():
+    """
+    เจตนาของการออกแบบ: คำขอที่สำเร็จใช้ไม่ถึง 1.3 วินาทีในทุกการวัด ส่วนที่ล้มคือไม่ตอบเลย การรอนานจึงไม่มีประโยชน์
+    timeout ต้องสั้น และเวลารวมกรณีแย่สุด (ล้มครบทุกครั้ง) ต้องอยู่ในเพดานของ job (timeout-minutes: 15 ใน workflow)
+    """
+    assert 0 < fw.BATCH_TIMEOUT <= 10
+    attempts = len(fw.BATCH_RETRY_WAITS) + 1
+    worst_case_seconds = attempts * fw.BATCH_TIMEOUT + sum(fw.BATCH_RETRY_WAITS)
+    assert worst_case_seconds <= 180
+    assert fw.BATCH_RETRY_WAITS == tuple(sorted(fw.BATCH_RETRY_WAITS))   # รอนานขึ้นเรื่อยๆ
+
+
+@pytest.mark.parametrize("failure", [
+    requests.exceptions.ReadTimeout(),
+    requests.exceptions.ConnectTimeout(),
+    requests.exceptions.ConnectionError(),
+], ids=["read_timeout", "connect_timeout", "connection_error"])
+def test_batch_recovers_after_transient_failures_with_long_waits(install_api, sleeps, failure):
+    api = install_api(failure, failure, make_response(200, batch_payload()))
+    assert fw.fetch_weather_batch(fw.LOCATIONS) is not None
+    assert len(api.calls) == 3
+    assert sleeps == [10, 30]
+
+
+def test_batch_gives_up_after_four_attempts(install_api, sleeps, capsys):
+    api = install_api(requests.exceptions.ReadTimeout())
+    assert fw.fetch_weather_batch(fw.LOCATIONS) is None
+    assert len(api.calls) == 4
+    assert sleeps == [10, 30, 60]
+    out = capsys.readouterr().out
+    assert out.count("ReadTimeout") >= 4                    # ชนิดของ timeout ถูกบันทึกทุกครั้ง
+    assert "ล้มเหลวครบ 4 ครั้ง" in out
+
+
+def test_batch_distinguishes_connect_timeout_in_the_log(install_api, sleeps, capsys):
+    install_api(requests.exceptions.ConnectTimeout(), make_response(200, batch_payload()))
+    fw.fetch_weather_batch(fw.LOCATIONS)
+    assert "ConnectTimeout" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("status", [429, 500, 502, 503, 504])
+def test_batch_retries_retryable_http_status(install_api, sleeps, status):
+    api = install_api(make_response(status), make_response(200, batch_payload()))
+    assert fw.fetch_weather_batch(fw.LOCATIONS) is not None
+    assert len(api.calls) == 2 and sleeps == [10]
+
+
+@pytest.mark.parametrize("status", [400, 401, 403, 404])
+def test_batch_does_not_retry_client_errors(install_api, sleeps, status):
+    api = install_api(make_response(status, {"error": True, "reason": "bad"}))
+    assert fw.fetch_weather_batch(fw.LOCATIONS) is None
+    assert len(api.calls) == 1 and sleeps == []
+
+
+def test_batch_uses_retry_after_but_caps_it(install_api, sleeps):
+    install_api(make_response(429, headers={"Retry-After": "7"}), make_response(200, batch_payload()))
+    fw.fetch_weather_batch(fw.LOCATIONS)
+    assert sleeps == [7]
+    sleeps.clear()
+    install_api(make_response(429, headers={"Retry-After": "99999"}), make_response(200, batch_payload()))
+    fw.fetch_weather_batch(fw.LOCATIONS)
+    assert sleeps == [fw.BATCH_MAX_RETRY_AFTER_SECONDS]
+
+
+def test_batch_ignores_unusable_retry_after(install_api, sleeps):
+    install_api(make_response(503, headers={"Retry-After": "Wed, 21 Oct 2026 07:28:00 GMT"}),
+                make_response(200, batch_payload()))
+    fw.fetch_weather_batch(fw.LOCATIONS)
+    assert sleeps == [10]
+
+
+def test_batch_with_too_few_results_is_treated_as_failure_and_retried(install_api, sleeps, capsys):
+    """ลำดับเลื่อนเพราะขาดไปหนึ่งเมือง: ต้องไม่ใช้ผลนี้ (ไม่งั้นทุกเมืองจะได้ข้อมูลของเมืองอื่น)"""
+    api = install_api(make_response(200, batch_payload()[:-1]))
+    assert fw.fetch_weather_batch(fw.LOCATIONS) is None
+    assert len(api.calls) == 4
+    assert "ได้ข้อมูล 11 เมือง แต่ขอ 12 เมือง" in capsys.readouterr().out
+
+
+def test_batch_with_too_many_results_is_treated_as_failure(install_api, sleeps):
+    install_api(make_response(200, batch_payload() + batch_payload()[:1]))
+    assert fw.fetch_weather_batch(fw.LOCATIONS) is None
+
+
+def test_batch_error_object_instead_of_list_is_reported_with_reason(install_api, sleeps, capsys):
+    install_api(make_response(200, {"error": True, "reason": "Cannot initialize"}))
+    assert fw.fetch_weather_batch(fw.LOCATIONS) is None
+    assert "Cannot initialize" in capsys.readouterr().out
+
+
+def test_batch_invalid_json_is_retried(install_api, sleeps):
+    api = install_api(make_response(200, raw=b"<html>bad gateway</html>"), make_response(200, batch_payload()))
+    assert fw.fetch_weather_batch(fw.LOCATIONS) is not None
+    assert len(api.calls) == 2
+
+
+def test_batch_single_location_response_object_is_accepted(install_api, sleeps):
+    """ถ้าขอเมืองเดียว API ตอบเป็น object ตัวเดียว ไม่ใช่ list"""
+    install_api(make_response(200, api_payload(lat=13.75, lon=100.5)))
+    items = fw.fetch_weather_batch(fw.LOCATIONS[:1])
+    assert items is not None and len(items) == 1
+
+
+def test_batch_unexpected_requests_error_is_not_retried(install_api, sleeps):
+    api = install_api(requests.exceptions.TooManyRedirects())
+    assert fw.fetch_weather_batch(fw.LOCATIONS) is None
+    assert len(api.calls) == 1
+
+
+# ---------- verify_batch_item: ป้องกันการจับคู่เมืองผิดตัว ----------
+
+def test_verify_accepts_grid_snapped_coordinates():
+    for loc in fw.LOCATIONS:
+        item = api_payload(lat=loc["lat"] + 0.13, lon=loc["lon"] - 0.13)   # การปัดไปจุดกริดที่ใกล้ที่สุด
+        assert fw.verify_batch_item(loc, item) is None
+
+
+def test_verify_rejects_every_wrong_city_pairing():
+    """
+    หัวใจของความปลอดภัยในโหมดรวม: สำหรับทุกคู่เมืองที่ไม่ใช่เมืองเดียวกัน ข้อมูลของเมือง j ต้องถูกปฏิเสธเมื่อมาอยู่
+    ที่ตำแหน่งของเมือง i นี่คือการยืนยันว่า COORDINATE_TOLERANCE_DEGREES เล็กพอที่จะแยกทุกเมืองใน LOCATIONS ออกจากกัน
+    """
+    for i, j in itertools.permutations(range(len(fw.LOCATIONS)), 2):
+        li, lj = fw.LOCATIONS[i], fw.LOCATIONS[j]
+        wrong = api_payload(lat=lj["lat"] + 0.03, lon=lj["lon"] + 0.03)
+        assert fw.verify_batch_item(li, wrong) is not None, (li["name"], lj["name"])
+
+
+def test_verify_rejects_a_list_shifted_by_one_position():
+    items = batch_payload()
+    shifted = [items[-1]] + items[:-1]
+    problems = [fw.verify_batch_item(loc, it) for loc, it in zip(fw.LOCATIONS, shifted)]
+    assert all(p is not None for p in problems)
+
+
+@pytest.mark.parametrize("item", [None, "text", 5, [], {}, {"latitude": "13.7"}, {"latitude": 13.7},
+                                  {"longitude": 100.5}, {"latitude": None, "longitude": None}])
+def test_verify_rejects_items_without_usable_coordinates(item):
+    assert fw.verify_batch_item(fw.LOCATIONS[0], item) is not None
+
+
+def test_verify_handles_longitude_wraparound():
+    near_dateline = {"name": "Fiji", "country": "Fiji", "lat": -17.7, "lon": 179.9}
+    assert fw.verify_batch_item(near_dateline, api_payload(lat=-17.7, lon=-179.9)) is None
+    assert fw.verify_batch_item(near_dateline, api_payload(lat=-17.7, lon=-170.0)) is not None
+
+
+# ---------- main() ในโหมดรวม (ต่อกับ requests จำลอง ไม่ต่อ database/อินเทอร์เน็ต) ----------
+
+@pytest.fixture
+def batch_pipeline(monkeypatch, install_api, sleeps):
+    """main() โหมดค่าเริ่มต้น (batch): API จำลองที่ระดับ requests.get, database จำลองที่ระดับ save_to_database"""
+    env = type("Env", (), {})()
+    env.saved = {}        # ชื่อเมือง -> record ที่ถูกบันทึก
+    env.connections = []
+    env.db_down = False
+    env.install_api = install_api
+    env.sleeps = sleeps
+    monkeypatch.setenv("SUPABASE_DB_URL", "postgresql://fake")
+    monkeypatch.delenv("FETCH_MODE", raising=False)
+    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
+    monkeypatch.delenv("GITHUB_STEP_SUMMARY", raising=False)
+
+    def fake_open(db_url):
+        if env.db_down:
+            return None
+        conn = FakeConn()
+        env.connections.append(conn)
+        return conn
+
+    def fake_save(record, conn):
+        env.saved[record["location_name"]] = record
+        return True
+
+    monkeypatch.setattr(fw, "open_connection", fake_open)
+    monkeypatch.setattr(fw, "save_to_database", fake_save)
+    return env
+
+
+def test_batch_main_saves_every_city_with_its_own_data(batch_pipeline, capsys):
+    """จับคู่ถูกตัว: อุณหภูมิที่บันทึกของแต่ละเมืองต้องเป็นของเมืองนั้นจริง (แต่ละเมืองมีค่าไม่ซ้ำกัน)"""
+    api = batch_pipeline.install_api(make_response(200, batch_payload()))
+    assert fw.main() == 0
+    assert len(api.calls) == 1                                     # 12 เมือง = 1 คำขอ
+    assert set(batch_pipeline.saved) == set(NAMES)
+    for index, name in enumerate(NAMES):
+        assert batch_pipeline.saved[name]["temperature_c"] == 20.0 + index, name
+    assert batch_pipeline.sleeps == []                             # โหมดรวมไม่ต้องหน่วงระหว่างเมือง
+    assert "โหมด: batch" in capsys.readouterr().out
+
+
+def test_batch_main_rejects_swapped_cities_instead_of_saving_wrong_data(batch_pipeline, capsys):
+    items = batch_payload()
+    items[0], items[1] = items[1], items[0]                        # Bangkok <-> Chiang Mai
+    batch_pipeline.install_api(make_response(200, items))
+    assert fw.main() == 0                                          # ล้ม 2 จาก 12 ยังไม่เกินเกณฑ์
+    assert NAMES[0] not in batch_pipeline.saved and NAMES[1] not in batch_pipeline.saved
+    assert set(batch_pipeline.saved) == set(NAMES[2:])
+    out = capsys.readouterr().out
+    assert "อาจเป็นลำดับสลับ" in out
+    assert f"เมืองที่ล้มเหลว: {NAMES[0]}, {NAMES[1]}" in out
+
+
+def test_batch_main_all_attempts_fail_returns_1_and_saves_nothing(batch_pipeline, capsys):
+    api = batch_pipeline.install_api(requests.exceptions.ReadTimeout())
+    assert fw.main() == 1
+    assert len(api.calls) == 4
+    assert batch_pipeline.sleeps == [10, 30, 60]
+    assert batch_pipeline.saved == {}
+    out = capsys.readouterr().out
+    assert "ล้มเหลว 12" in out
+    assert "[FAILED]" in out
+    assert "เมืองที่ล้มเหลว: " + ", ".join(NAMES) in out
+
+
+def test_batch_main_recovers_on_a_later_attempt(batch_pipeline):
+    api = batch_pipeline.install_api(requests.exceptions.ReadTimeout(), requests.exceptions.ReadTimeout(),
+                                     make_response(200, batch_payload()))
+    assert fw.main() == 0
+    assert len(api.calls) == 3
+    assert set(batch_pipeline.saved) == set(NAMES)
+
+
+def test_batch_main_list_that_is_one_city_short_is_never_saved(batch_pipeline):
+    batch_pipeline.install_api(make_response(200, batch_payload()[1:]))     # ขาดเมืองแรก ลำดับจะเลื่อนทั้งหมดถ้าใช้
+    assert fw.main() == 1
+    assert batch_pipeline.saved == {}
+
+
+def test_batch_main_city_with_missing_current_block_counts_as_failed(batch_pipeline, capsys):
+    items = batch_payload()
+    del items[3]["current"]
+    batch_pipeline.install_api(make_response(200, items))
+    assert fw.main() == 0
+    assert NAMES[3] not in batch_pipeline.saved and len(batch_pipeline.saved) == len(NAMES) - 1
+    assert f"เมืองที่ล้มเหลว: {NAMES[3]}" in capsys.readouterr().out
+
+
+def test_batch_main_validation_rejection_is_reported_separately(batch_pipeline, capsys):
+    temps = [20.0 + i for i in range(len(NAMES))]
+    temps[5] = 999.0
+    batch_pipeline.install_api(make_response(200, batch_payload(temps)))
+    assert fw.main() == 0
+    assert NAMES[5] not in batch_pipeline.saved
+    out = capsys.readouterr().out
+    assert "ไม่ผ่าน validation 1 | ล้มเหลว 0" in out
+    assert f"เมืองที่ไม่ผ่าน validation: {NAMES[5]}" in out
+
+
+def test_batch_main_too_many_failures_returns_1_but_keeps_good_cities(batch_pipeline):
+    n_bad = FAILURE_LIMIT + 1                                           # เกินเกณฑ์ที่ยอมให้ล้มได้ 1 เมือง
+    items = batch_payload()
+    for i in range(n_bad):
+        items[i] = dict(items[i], latitude=0.0, longitude=0.0)           # พิกัดผิด (จำลองว่าลำดับสลับ)
+    batch_pipeline.install_api(make_response(200, items))
+    assert fw.main() == 1
+    assert len(batch_pipeline.saved) == len(NAMES) - n_bad              # เมืองที่ถูกต้องยังถูกบันทึกอยู่
+
+
+def test_batch_main_does_not_call_the_api_when_database_is_down(batch_pipeline):
+    batch_pipeline.db_down = True
+    api = batch_pipeline.install_api(make_response(200, batch_payload()))
+    assert fw.main() == 1
+    assert api.calls == []
+
+
+def test_main_rejects_invalid_fetch_mode_without_touching_anything(batch_pipeline, monkeypatch):
+    monkeypatch.setenv("FETCH_MODE", "turbo")
+    api = batch_pipeline.install_api(make_response(200, batch_payload()))
+    assert fw.main() == 1
+    assert api.calls == [] and batch_pipeline.connections == []
+
+
+def test_per_city_mode_still_makes_one_request_per_city(batch_pipeline, monkeypatch):
+    """FETCH_MODE=per_city ต้องย้อนกลับไปพฤติกรรมเดิมได้จริง (12 คำขอ ไม่ใช่ 1)"""
+    monkeypatch.setenv("FETCH_MODE", "per_city")
+    api = batch_pipeline.install_api(make_response(200, api_payload(time="2026-01-01T00:15")))
+    assert fw.main() == 0
+    assert len(api.calls) == len(NAMES)
+    for call in api.calls:
+        assert "," not in str(call["params"]["latitude"])
+
+
+# ---------- การแจ้งเตือนบน GitHub ----------
+
+def test_github_annotations_appear_only_on_github_and_only_when_something_failed(batch_pipeline, monkeypatch, capsys):
+    items = batch_payload()
+    items[2] = dict(items[2], latitude=0.0, longitude=0.0)
+    batch_pipeline.install_api(make_response(200, items))
+    fw.main()
+    assert "::warning" not in capsys.readouterr().out               # ไม่ใช่ GitHub: ไม่พิมพ์
+
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    batch_pipeline.install_api(make_response(200, items))
+    fw.main()
+    out = capsys.readouterr().out
+    assert f"::warning title=Fetch Weather::บันทึกสำเร็จ 11/12 | ล้มเหลว: {NAMES[2]}" in out
+
+    batch_pipeline.install_api(make_response(200, batch_payload()))
+    fw.main()
+    assert "::warning" not in capsys.readouterr().out               # ทุกเมืองสำเร็จ: ไม่เตือน
+
+
+def test_github_error_annotation_when_the_run_fails(batch_pipeline, monkeypatch, capsys):
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    batch_pipeline.install_api(requests.exceptions.ReadTimeout())
+    assert fw.main() == 1
+    assert "::error title=Fetch Weather::" in capsys.readouterr().out
+
+
+def test_annotation_escapes_characters_that_would_break_the_command(monkeypatch, capsys):
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    fw._github_annotation("warning", "100% ผิด\nบรรทัดใหม่")
+    out = capsys.readouterr().out.strip()
+    assert out == "::warning title=Fetch Weather::100%25 ผิด%0Aบรรทัดใหม่"
+
+
+def test_step_summary_is_written_when_available(batch_pipeline, monkeypatch, tmp_path):
+    summary_file = tmp_path / "summary.md"
+    monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary_file))
+    items = batch_payload()
+    items[0] = dict(items[0], latitude=0.0, longitude=0.0)
+    batch_pipeline.install_api(make_response(200, items))
+    fw.main()
+    text = summary_file.read_text(encoding="utf-8")
+    assert "โหมด batch" in text and "บันทึกสำเร็จ: 11/12" in text and NAMES[0] in text
