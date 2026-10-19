@@ -6,7 +6,7 @@ name: Sync to BigQuery
 on:
   # --- หยุดรันอัตโนมัติชั่วคราว: เอา # หน้า 2 บรรทัดนี้ออกเพื่อเปิดใช้งานอีกครั้ง ---
   # (ต้องคอมเมนต์ทั้งบล็อก schedule: ไม่ใช่เฉพาะบรรทัด cron มิฉะนั้น YAML จะไม่ถูกต้อง)
-  # schedule:
+  schedule:
   - cron: "17 2 * * *"  # 02:17 UTC ทุกวัน (นาทีสุ่ม เลี่ยง peak load เหมือน workflow อื่น)
   workflow_dispatch:
 
