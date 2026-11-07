@@ -3,3 +3,4 @@
 -r requirements-pipeline.txt
 -r requirements-sync.txt
 pytest>=8
+psycopg[binary]
